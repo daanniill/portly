@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 )
 
 var (
@@ -13,7 +14,6 @@ func main() {
 	fmt.Println("Start portly")
 
 	// Handle panics raised from the server
-
 	defer func() {
 		if e := recover(); e != nil { // creates a variable e := recover() (returns value cause by panic), then checks if its not nil
 			fmt.Printf(
@@ -22,4 +22,22 @@ func main() {
 			)
 		}
 	}() // defines anonymous function
+
+	listener, err := net.Listen("tcp", localAddress)
+	if err != nil {
+		panic(err)
+	} 
+
+	defer listener.Close()
+
+	// Handler listening function
+	for {
+		localConnection, err := listener.Accept()
+		if err != nil {
+			panic(err)
+		}
+
+		// Handle the actual forwarding to the remote
+		go handlePortForward(localConnection)
+	}
 }
