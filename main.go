@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net"
 )
 
@@ -23,7 +24,7 @@ func main() {
 		}
 	}() // defines anonymous function
 
-	listener, err := net.Listen("tcp", localAddress)
+	listener, err := net.Listen("tcp", localAddress) 
 	if err != nil {
 		panic(err)
 	} 
@@ -31,7 +32,8 @@ func main() {
 	defer listener.Close()
 
 	// Handler listening function
-	for {
+	// will accept traffic at the bound port and run a goroutine as a non-blocking action to handle forwarding the request to the remote location
+	for { // we want to continuously listen for requests and not immediately end the function execution
 		localConnection, err := listener.Accept()
 		if err != nil {
 			panic(err)
@@ -40,4 +42,20 @@ func main() {
 		// Handle the actual forwarding to the remote
 		go handlePortForward(localConnection)
 	}
+}
+
+func handlePortForward(local net.Conn) {
+	fmt.Printf("forwarding connection from local %s to remote %s\n", localAddress, remoteForwarder)
+
+	remoteConnectionForwarded, err := net.Dial("tcp", remoteForwarder)
+	if err != nil {
+		panic(err)
+	}
+
+	// Ensure the local gets the response data from the remote
+	go func() {
+		io.Copy(local, remoteConnectionForwarded)
+	}()
+
+
 }
