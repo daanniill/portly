@@ -7,8 +7,8 @@ import (
 )
 
 var (
-	localAddress string = "127.0.0.1:8080"
-	remoteForwarder string = "https://example.com"
+	localAddress string = "127.0.0.1:8080" // 127.0.0.1 is standard ip, basically localhost
+	remoteForwarder string = "127.0.0.1:9000"
 )
 
 func main() {
@@ -47,21 +47,21 @@ func main() {
 func handlePortForward(client net.Conn) {
 	fmt.Printf("forwarding connection from client %s to remote %s\n", localAddress, remoteForwarder)
 
-	remoteConnectionForwarded, err := net.Dial("tcp", remoteForwarder)
+	target, err := net.Dial("tcp", remoteForwarder)
 	if err != nil {
 		panic(err)
 	}
 
 	// These calls will do a bidirectional read/write across the open connections to the sockets opened to ensure that data is copied from the local server to the remote host
-	// (and any responses from the remote server are then copied back to the remote server for additional handling)
+	// (and any responses from the target server are then copied back to the target server for additional handling)
 
-	// Ensure the client gets the response data from the remote
+	// Ensure the client gets the response data from the target
 	go func() {
-		io.Copy(client, remoteConnectionForwarded)
+		io.Copy(client, target)
 	}()
 	
-	// Ensure the remote gets the request data from the client
+	// Ensure the target gets the request data from the client
 	go func() {
-		io.Copy(remoteConnectionForwarded, client)
+		io.Copy(target, client)
 	}()
 }
