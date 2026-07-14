@@ -45,7 +45,7 @@ func main() {
 }
 
 func handlePortForward(client net.Conn) {
-	fmt.Printf("forwarding connection from client %s to remote %s\n", localAddress, remoteForwarder)
+	fmt.Printf("forwarding connection from client %s to target %s\n", localAddress, remoteForwarder)
 
 	target, err := net.Dial("tcp", remoteForwarder)
 	if err != nil {
