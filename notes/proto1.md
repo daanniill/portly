@@ -70,3 +70,22 @@ go io.Copy(target, client)
 go io.Copy(client, target)
 ```
 TCP permits data to flow in both directions independently; closing the sending direction does not inherently prevent continuing to receive.
+
+## What the chaannel is doing
+```go
+done := make(chan error, 2)
+```
+Each copying goroutine sends its result into the channel
+```go
+done <- err
+```
+The handler waits here:
+```go
+copyErr := <- done
+```
+The flow is:
+Goroutine 1: client → target ──┐
+                               ├── done channel
+Goroutine 2: target → client ──┘
+                                      │
+Handler waits:                 copyErr := <-done

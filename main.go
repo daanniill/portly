@@ -41,6 +41,8 @@ func main() {
 func handlePortForward(client net.Conn) {
 	fmt.Printf("forwarding connection from client %s to target %s\n", localAddress, remoteAddress)
 
+	defer client.Close()
+
 	target, err := net.Dial("tcp", remoteAddress)
 	if err != nil {
 		log.Printf(
@@ -59,16 +61,40 @@ func handlePortForward(client net.Conn) {
 		remoteAddress,
 	)
 
+	// Buffered so both goroutines can report completion,
+	// even after this function begins returning.
+	done := make(chan error, 2)
+
 	// These calls will do a bidirectional read/write across the open connections to the sockets opened to ensure that data is copied from the local server to the remote host
 	// (and any responses from the target server are then copied back to the target server for additional handling)
 
-	// Ensure the client gets the response data from the target
+	// Client request traffic:
+	// client -> target
 	go func() {
-		io.Copy(client, target)
+		_, err := io.Copy(client, target)
+		done <- err
 	}()
 	
-	// Ensure the target gets the request data from the client
+	// Target response traffic:
+	// target -> client
 	go func() {
-		io.Copy(target, client)
+		_, err := io.Copy(target, client)
+		done <- err
 	}()
+
+	copyErr := <-done
+
+	if copyErr != nil {
+		log.Printf(
+			"connection %s ended with an error: %v",
+			client.RemoteAddr(),
+			copyErr,
+		)
+	}
+
+	log.Printf(
+		"connection closed: %s → %s",
+		client.RemoteAddr(),
+		remoteAddress,
+	)
 }
