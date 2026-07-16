@@ -1,28 +1,40 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net"
 )
 
-var (
-	localAddress string = "127.0.0.1:8080" // 127.0.0.1 is standard ip, basically localhost
-	remoteAddress string = "127.0.0.1:9001"
-)
-
 func main() {
 	fmt.Println("Start portly")
 
-	listener, err := net.Listen("tcp", localAddress) 
+	//define arguments
+	// 127.0.0.1 is standard ip, basically localhost
+	localAddress := flag.String(
+		"listen", // name
+		"127.0.0.1:8080", // default
+		"local address to listen on", //desc
+	)
+
+	remoteAddress := flag.String(
+		"target",
+		"127.0.0.1:9001",
+		"remote address to target",
+	)
+
+	flag.Parse()
+
+	listener, err := net.Listen("tcp", *localAddress) 
 	if err != nil {
-		log.Fatalf("failed to listen on %s: %v", localAddress, err)
+		log.Fatalf("failed to listen on %s: %v", *localAddress, err)
 	} 
 
 	defer listener.Close()
 
-	log.Printf("Portly forwarding %s → %s", localAddress, remoteAddress)
+	log.Printf("Portly forwarding %s → %s", *localAddress, *remoteAddress)
 
 	// Handler listening function
 	// will accept traffic at the bound port and run a goroutine as a non-blocking action to handle forwarding the request to the remote location
@@ -34,12 +46,12 @@ func main() {
 		}
 
 		// Handle the actual forwarding to the remote
-		go handlePortForward(client)
+		go handlePortForward(client, *remoteAddress)
 	}
 }
 
-func handlePortForward(client net.Conn) {
-	fmt.Printf("forwarding connection from client %s to target %s\n", localAddress, remoteAddress)
+func handlePortForward(client net.Conn, remoteAddress string) {
+	fmt.Printf("forwarding connection from client %s to target %s\n", client.RemoteAddr(), remoteAddress)
 
 	defer client.Close()
 
@@ -71,14 +83,14 @@ func handlePortForward(client net.Conn) {
 	// Client request traffic:
 	// client -> target
 	go func() {
-		_, err := io.Copy(client, target)
+		_, err := io.Copy(target, client)
 		done <- err
 	}()
 	
 	// Target response traffic:
 	// target -> client
 	go func() {
-		_, err := io.Copy(target, client)
+		_, err := io.Copy(client, target)
 		done <- err
 	}()
 
