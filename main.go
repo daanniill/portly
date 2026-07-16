@@ -9,7 +9,7 @@ import (
 
 var (
 	localAddress string = "127.0.0.1:8080" // 127.0.0.1 is standard ip, basically localhost
-	remoteAddress string = "127.0.0.1:9000"
+	remoteAddress string = "127.0.0.1:9001"
 )
 
 func main() {
