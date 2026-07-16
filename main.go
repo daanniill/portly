@@ -2,14 +2,13 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"io"
 	"log"
 	"net"
 )
 
 func main() {
-	fmt.Println("Start portly")
+	log.Println("Start portly")
 
 	//define arguments
 	// 127.0.0.1 is standard ip, basically localhost
@@ -35,7 +34,11 @@ func main() {
 	defer listener.Close()
 
 	log.Printf("Portly forwarding %s → %s", *localAddress, *remoteAddress)
+	
+	runForwarder(listener, *remoteAddress)
+}
 
+func runForwarder(listener net.Listener, remoteAddress string){
 	// Handler listening function
 	// will accept traffic at the bound port and run a goroutine as a non-blocking action to handle forwarding the request to the remote location
 	for { // we want to continuously listen for requests and not immediately end the function execution
@@ -46,12 +49,12 @@ func main() {
 		}
 
 		// Handle the actual forwarding to the remote
-		go handlePortForward(client, *remoteAddress)
+		go handlePortForward(client, remoteAddress)
 	}
 }
 
 func handlePortForward(client net.Conn, remoteAddress string) {
-	fmt.Printf("forwarding connection from client %s to target %s\n", client.RemoteAddr(), remoteAddress)
+	log.Printf("forwarding connection from client %s to target %s", client.RemoteAddr(), remoteAddress)
 
 	defer client.Close()
 
@@ -77,8 +80,8 @@ func handlePortForward(client net.Conn, remoteAddress string) {
 	// even after this function begins returning.
 	done := make(chan error, 2)
 
-	// These calls will do a bidirectional read/write across the open connections to the sockets opened to ensure that data is copied from the local server to the remote host
-	// (and any responses from the target server are then copied back to the target server for additional handling)
+	// Requests are copied from the client to the target,
+	// and responses are copied from the target back to the client.
 
 	// Client request traffic:
 	// client -> target
