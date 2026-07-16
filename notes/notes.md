@@ -17,3 +17,9 @@ curl/browser             your Go program             web server
   1. Client & Forwarder
   2. Forwarder & Destination
 
+## Testing
+
+Run test server which opens up an http server on port 9090 using:
+```bash
+python test_server.py
+```
