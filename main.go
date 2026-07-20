@@ -14,8 +14,8 @@ func main() {
 	//define arguments
 	// 127.0.0.1 is standard ip, basically localhost
 	localAddress := flag.String(
-		"listen", // name
-		"127.0.0.1:8080", // default
+		"listen",                     // name
+		"127.0.0.1:8080",             // default
 		"local address to listen on", //desc
 	)
 
@@ -27,21 +27,21 @@ func main() {
 
 	flag.Parse()
 
-	listener, err := net.Listen("tcp", *localAddress) 
+	listener, err := net.Listen("tcp", *localAddress)
 	if err != nil {
 		log.Fatalf("failed to listen on %s: %v", *localAddress, err)
-	} 
+	}
 
 	defer listener.Close()
 
 	log.Printf("Portly forwarding %s → %s", *localAddress, *remoteAddress)
-	
+
 	if err := runForwarder(listener, *remoteAddress); err != nil {
 		log.Fatalf("forwarder stopped: %v", err)
 	}
 }
 
-func runForwarder(listener net.Listener, remoteAddress string) error{
+func runForwarder(listener net.Listener, remoteAddress string) error {
 	// Handler listening function
 	// will accept traffic at the bound port and run a goroutine as a non-blocking action to handle forwarding the request to the remote location
 	for { // we want to continuously listen for requests and not immediately end the function execution
@@ -91,7 +91,7 @@ func handlePortForward(client net.Conn, remoteAddress string) {
 		_, err := io.Copy(target, client)
 		done <- err
 	}()
-	
+
 	// Target response traffic:
 	// target -> client
 	go func() {
