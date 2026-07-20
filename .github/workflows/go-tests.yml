@@ -1,0 +1,45 @@
+name: Go Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Check formatting
+        run: |
+          files="$(gofmt -l .)"
+
+          if [ -n "$files" ]; then
+            echo "The following files are not formatted:"
+            echo "$files"
+            exit 1
+          fi
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build -v ./...
+
+      - name: Run tests
+        run: go test -race -cover -v ./...

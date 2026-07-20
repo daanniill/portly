@@ -18,17 +18,17 @@ import (
 func startTestForwarder(t *testing.T, targetAddress string) string {
 	t.Helper() // mark this function as a helper
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")// define a listener on any available port 
+	listener, err := net.Listen("tcp", "127.0.0.1:0") // define a listener on any available port
 	if err != nil {
 		log.Fatalf("failed tocreate forwarder listener: %v", err)
 	}
-	
+
 	errCh := make(chan error, 1)
 
 	go func() {
 		errCh <- runForwarder(listener, targetAddress)
 	}()
-	
+
 	// free up resources after running tests
 	t.Cleanup(func() {
 		// check if listener closed succesfully
@@ -72,7 +72,7 @@ func TestForwarderForwardsHTTPResponse(t *testing.T) {
 		// r contains information about the incoming request.
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Connection", "close") // close tcp connections when response finishes
-			w.WriteHeader(http.StatusOK) // send 200 for succesful connections
+			w.WriteHeader(http.StatusOK)          // send 200 for succesful connections
 
 			if _, err := w.Write([]byte("hello through forwarder")); err != nil {
 				t.Errorf("failed to write target response: %v", err)
