@@ -19,7 +19,7 @@ curl/browser             your Go program             web server
 
 ## Testing
 
-Run test server which opens up an http server on port 9090 using:
+Run tests by running:
 ```bash
-python test_server.py
+go test
 ```
