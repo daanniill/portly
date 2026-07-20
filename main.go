@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"time"
 )
 
 func main() {
@@ -81,14 +82,15 @@ func handlePortForward(client net.Conn, remoteAddress string) {
 	// Requests are copied from the client to the target,
 	// and responses are copied from the target back to the client.
 
-	// STATS
-	sent := make(chan int, 1)
-	recieved := make(chan int, 1)
-
 	// Each direction reports its own error so a failure on one
 	// side can never be masked by a nil result from the other.
 	errClientToTarget := make(chan error, 1)
 	errTargetToClient := make(chan error, 1)
+
+	// STATS
+	sent := make(chan int, 1)
+	recieved := make(chan int, 1)
+	start := time.Now()
 
 	// Client request traffic:
 	// client -> target
@@ -110,6 +112,7 @@ func handlePortForward(client net.Conn, remoteAddress string) {
 	receivedBytes := <-recieved
 	clientToTargetErr := <-errClientToTarget
 	targetToClientErr := <-errTargetToClient
+	duration := time.Since(start)
 
 	if clientToTargetErr != nil {
 		log.Printf(
@@ -134,9 +137,7 @@ func handlePortForward(client net.Conn, remoteAddress string) {
 		remoteAddress,
 	)
 
-	log.Printf(
-		"sent: %d \nreceived: %d",
-		sentBytes,
-		receivedBytes,
-	)
+	log.Printf("sent: %d", sentBytes)
+	log.Printf("received: %d", receivedBytes)
+	log.Printf("duration: %d ms", duration.Milliseconds())
 }
