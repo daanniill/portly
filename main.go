@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -28,18 +33,36 @@ func main() {
 
 	flag.Parse()
 
+	// cancel contex when Ctrl+c or SIGTERM is received
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	listener, err := net.Listen("tcp", *localAddress)
 	if err != nil {
 		log.Fatalf("failed to listen on %s: %v", *localAddress, err)
 	}
 
-	defer listener.Close()
-
 	log.Printf("Portly forwarding %s → %s", *localAddress, *remoteAddress)
+
+	go func() {
+		<-ctx.Done()
+
+		log.Println("shutdown signal received")
+		log.Println("stopping new connections")
+
+		if err := listener.Close(); err != nil {
+			log.Printf("failed to close listener: %v", err)
+		}
+	}()
 
 	if err := runForwarder(listener, *remoteAddress); err != nil {
 		log.Fatalf("forwarder stopped: %v", err)
 	}
+
+	log.Println("waiting for active connections to finish")
+
+	log.Println("all connections finished")
+	log.Println("Portly stopped cleanly")
 }
 
 func runForwarder(listener net.Listener, remoteAddress string) error {
@@ -48,11 +71,18 @@ func runForwarder(listener net.Listener, remoteAddress string) error {
 	for { // we want to continuously listen for requests and not immediately end the function execution
 		client, err := listener.Accept()
 		if err != nil {
+			// don't return graceful shutdowns as errors
+			if errors.Is(err, net.ErrClosed) {
+				return nil
+			}
 			return fmt.Errorf("failed to accept connection: %v", err)
 		}
 
 		// Handle the actual forwarding to the remote
-		go handlePortForward(client, remoteAddress)
+		go func() {
+			handlePortForward(client, remoteAddress)
+		}()
+
 	}
 }
 
