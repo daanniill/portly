@@ -118,3 +118,28 @@ func TestForwarderForwardsHTTPResponse(t *testing.T) {
 		)
 	}
 }
+
+func TestForwarderHandlesConcurrentClients(t *testing.T) {
+	// create a target test server using httptest
+	targetServer := httptest.NewServer(
+		// defining a handler function for this test server to handle http request
+		// w is used to construct the HTTP response sent back to the client.
+		// r contains information about the incoming request.
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Connection", "close") // close tcp connections when response finishes
+			w.WriteHeader(http.StatusOK)          // send 200 for succesful connections
+
+			if _, err := w.Write([]byte("hello through forwarder")); err != nil {
+				t.Errorf("failed to write target response: %v", err)
+			}
+		}),
+	)
+
+	defer targetServer.Close()
+
+	targetAddress := getTargetAddress(t, targetServer.URL)
+	forwarderAddress := startTestForwarder(t, targetAddress)
+
+	const requestCount = 50
+	
+}
