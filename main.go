@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -35,17 +36,18 @@ func main() {
 
 	log.Printf("Portly forwarding %s → %s", *localAddress, *remoteAddress)
 	
-	runForwarder(listener, *remoteAddress)
+	if err := runForwarder(listener, *remoteAddress); err != nil {
+		log.Fatalf("forwarder stopped: %v", err)
+	}
 }
 
-func runForwarder(listener net.Listener, remoteAddress string){
+func runForwarder(listener net.Listener, remoteAddress string) error{
 	// Handler listening function
 	// will accept traffic at the bound port and run a goroutine as a non-blocking action to handle forwarding the request to the remote location
 	for { // we want to continuously listen for requests and not immediately end the function execution
 		client, err := listener.Accept()
 		if err != nil {
-			log.Printf("failed to accept connection: %v", err)
-			continue
+			return fmt.Errorf("failed to accept connection: %v", err)
 		}
 
 		// Handle the actual forwarding to the remote
