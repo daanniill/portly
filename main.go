@@ -1,45 +1,62 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net"
 )
 
-var (
-	localAddress string = "127.0.0.1:8080" // 127.0.0.1 is standard ip, basically localhost
-	remoteAddress string = "127.0.0.1:9001"
-)
-
 func main() {
-	fmt.Println("Start portly")
+	log.Println("Start portly")
 
-	listener, err := net.Listen("tcp", localAddress) 
+	//define arguments
+	// 127.0.0.1 is standard ip, basically localhost
+	localAddress := flag.String(
+		"listen", // name
+		"127.0.0.1:8080", // default
+		"local address to listen on", //desc
+	)
+
+	remoteAddress := flag.String(
+		"target",
+		"127.0.0.1:9001",
+		"remote address to target",
+	)
+
+	flag.Parse()
+
+	listener, err := net.Listen("tcp", *localAddress) 
 	if err != nil {
-		log.Fatalf("failed to listen on %s: %v", localAddress, err)
+		log.Fatalf("failed to listen on %s: %v", *localAddress, err)
 	} 
 
 	defer listener.Close()
 
-	log.Printf("Portly forwarding %s → %s", localAddress, remoteAddress)
+	log.Printf("Portly forwarding %s → %s", *localAddress, *remoteAddress)
+	
+	if err := runForwarder(listener, *remoteAddress); err != nil {
+		log.Fatalf("forwarder stopped: %v", err)
+	}
+}
 
+func runForwarder(listener net.Listener, remoteAddress string) error{
 	// Handler listening function
 	// will accept traffic at the bound port and run a goroutine as a non-blocking action to handle forwarding the request to the remote location
 	for { // we want to continuously listen for requests and not immediately end the function execution
 		client, err := listener.Accept()
 		if err != nil {
-			log.Printf("failed to accept connection: %v", err)
-			continue
+			return fmt.Errorf("failed to accept connection: %v", err)
 		}
 
 		// Handle the actual forwarding to the remote
-		go handlePortForward(client)
+		go handlePortForward(client, remoteAddress)
 	}
 }
 
-func handlePortForward(client net.Conn) {
-	fmt.Printf("forwarding connection from client %s to target %s\n", localAddress, remoteAddress)
+func handlePortForward(client net.Conn, remoteAddress string) {
+	log.Printf("forwarding connection from client %s to target %s", client.RemoteAddr(), remoteAddress)
 
 	defer client.Close()
 
@@ -65,20 +82,20 @@ func handlePortForward(client net.Conn) {
 	// even after this function begins returning.
 	done := make(chan error, 2)
 
-	// These calls will do a bidirectional read/write across the open connections to the sockets opened to ensure that data is copied from the local server to the remote host
-	// (and any responses from the target server are then copied back to the target server for additional handling)
+	// Requests are copied from the client to the target,
+	// and responses are copied from the target back to the client.
 
 	// Client request traffic:
 	// client -> target
 	go func() {
-		_, err := io.Copy(client, target)
+		_, err := io.Copy(target, client)
 		done <- err
 	}()
 	
 	// Target response traffic:
 	// target -> client
 	go func() {
-		_, err := io.Copy(target, client)
+		_, err := io.Copy(client, target)
 		done <- err
 	}()
 
