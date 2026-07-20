@@ -78,40 +78,65 @@ func handlePortForward(client net.Conn, remoteAddress string) {
 		remoteAddress,
 	)
 
-	// Buffered so both goroutines can report completion,
-	// even after this function begins returning.
-	done := make(chan error, 2)
-
 	// Requests are copied from the client to the target,
 	// and responses are copied from the target back to the client.
+
+	// STATS
+	sent := make(chan int, 1)
+	recieved := make(chan int, 1)
+
+	// Each direction reports its own error so a failure on one
+	// side can never be masked by a nil result from the other.
+	errClientToTarget := make(chan error, 1)
+	errTargetToClient := make(chan error, 1)
 
 	// Client request traffic:
 	// client -> target
 	go func() {
-		_, err := io.Copy(target, client)
-		done <- err
+		bytes, err := io.Copy(target, client)
+		sent <- int(bytes)
+		errClientToTarget <- err
 	}()
 
 	// Target response traffic:
 	// target -> client
 	go func() {
-		_, err := io.Copy(client, target)
-		done <- err
+		bytes, err := io.Copy(client, target)
+		recieved <- int(bytes)
+		errTargetToClient <- err
 	}()
 
-	copyErr := <-done
+	sentBytes := <-sent
+	receivedBytes := <-recieved
+	clientToTargetErr := <-errClientToTarget
+	targetToClientErr := <-errTargetToClient
 
-	if copyErr != nil {
+	if clientToTargetErr != nil {
 		log.Printf(
-			"connection %s ended with an error: %v",
+			"client→target copy for %s ended with an error: %v",
 			client.RemoteAddr(),
-			copyErr,
+			clientToTargetErr,
 		)
 	}
 
+	if targetToClientErr != nil {
+		log.Printf(
+			"target→client copy for %s ended with an error: %v",
+			client.RemoteAddr(),
+			targetToClientErr,
+		)
+	}
+
+	// ------------- PRINTING STATS -------------
 	log.Printf(
 		"connection closed: %s → %s",
 		client.RemoteAddr(),
 		remoteAddress,
+	)
+
+	log.Printf(
+		"sent: %d \nreceived: %d",
+		sentBytes,
+		receivedBytes,
 	)
 }

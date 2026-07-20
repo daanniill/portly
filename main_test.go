@@ -150,11 +150,11 @@ func TestForwarderHandlesConcurrentClients(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	for i:=1; i <= requestCount; i++ {
+	for i := 1; i <= requestCount; i++ {
 
 		wg.Add(1)
 
-		go func(requestNumber int){
+		go func(requestNumber int) {
 			defer wg.Done()
 
 			response, err := client.Get("http://" + forwarderAddress)
@@ -169,7 +169,7 @@ func TestForwarderHandlesConcurrentClients(t *testing.T) {
 				errCh <- fmt.Errorf("request %d failed to read forwarded response: %v", requestNumber, err)
 				return
 			}
-			
+
 			if response.StatusCode != http.StatusOK {
 				errCh <- fmt.Errorf("request %d expected status %d, but got %d", requestNumber, http.StatusOK, response.StatusCode)
 				return
@@ -190,5 +190,3 @@ func TestForwarderHandlesConcurrentClients(t *testing.T) {
 		t.Error(err)
 	}
 }
-
-
