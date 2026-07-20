@@ -21,7 +21,7 @@ curl/browser             your Go program             web server
 
 ## Testing
 
-Run tests by running:
+Run:
 ```bash
 go test
 ```
