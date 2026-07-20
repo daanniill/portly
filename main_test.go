@@ -3,6 +3,9 @@ package main
 import (
 	"log"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"testing"
 )
 
@@ -33,4 +36,34 @@ func startTestForwarder(t *testing.T, targetAddress string) string {
 	})
 
 	return listener.Addr().String() // returns address of where listener was opened on
+}
+
+// getTargetAddress extracts "127.0.0.1:port" from an httptest URL.
+func getTargetAddress(t *testing.T, serverURL string) string {
+	t.Helper()
+
+	parsedURL, err := url.Parse(serverURL)
+	if err != nil {
+		t.Fatalf("failed to parse target URL: %v", err)
+	}
+
+	return parsedURL.Host
+}
+
+func TestForwarderForwardsHTTPResponse(t *testing.T) {
+	targetServer := httptest.NewServer(
+		// defining a handler function for this test server to handle http request
+		// w is used to construct the HTTP response sent back to the client.
+		// r contains information about the incoming request.
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Connection", "close") // close tcp connections when response finishes
+			w.WriteHeader(http.StatusOK) // send 200 for succesful connections
+
+			if _, err := w.Write([]byte("concurrent response")); err != nil {
+				t.Errorf("failed to write target response: %v", err)
+			}
+		}),
+	)
+
+	defer targetServer.Close()
 }
