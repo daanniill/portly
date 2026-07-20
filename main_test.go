@@ -1,12 +1,14 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync"
 	"testing"
 	"time"
 )
@@ -129,7 +131,7 @@ func TestForwarderHandlesConcurrentClients(t *testing.T) {
 			w.Header().Set("Connection", "close") // close tcp connections when response finishes
 			w.WriteHeader(http.StatusOK)          // send 200 for succesful connections
 
-			if _, err := w.Write([]byte("hello through forwarder")); err != nil {
+			if _, err := w.Write([]byte("concurrent response")); err != nil {
 				t.Errorf("failed to write target response: %v", err)
 			}
 		}),
@@ -141,5 +143,52 @@ func TestForwarderHandlesConcurrentClients(t *testing.T) {
 	forwarderAddress := startTestForwarder(t, targetAddress)
 
 	const requestCount = 50
-	
+
+	// initialize a client to send http requests
+	client := newTestHTTPClient()
+	errCh := make(chan error, requestCount)
+
+	var wg sync.WaitGroup
+
+	for i:=1; i <= requestCount; i++ {
+
+		wg.Add(1)
+
+		go func(requestNumber int){
+			defer wg.Done()
+
+			response, err := client.Get("http://" + forwarderAddress)
+			if err != nil {
+				errCh <- fmt.Errorf("request %d through forwarder failed: %v", requestNumber, err)
+				return
+			}
+			defer response.Body.Close()
+
+			body, err := io.ReadAll(response.Body)
+			if err != nil {
+				errCh <- fmt.Errorf("request %d failed to read forwarded response: %v", requestNumber, err)
+				return
+			}
+			
+			if response.StatusCode != http.StatusOK {
+				errCh <- fmt.Errorf("request %d expected status %d, but got %d", requestNumber, http.StatusOK, response.StatusCode)
+				return
+			}
+
+			expectedBody := "concurrent response"
+			if string(body) != expectedBody {
+				errCh <- fmt.Errorf("expected body %q, but got %q", expectedBody, string(body))
+				return
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Error(err)
+	}
 }
+
+
