@@ -1,11 +1,17 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 )
 
 func main() {
@@ -27,18 +33,36 @@ func main() {
 
 	flag.Parse()
 
+	// cancel contex when Ctrl+c or SIGTERM is received
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	listener, err := net.Listen("tcp", *localAddress)
 	if err != nil {
 		log.Fatalf("failed to listen on %s: %v", *localAddress, err)
 	}
 
-	defer listener.Close()
-
 	log.Printf("Portly forwarding %s → %s", *localAddress, *remoteAddress)
+
+	go func() {
+		<-ctx.Done()
+
+		log.Println("shutdown signal received")
+		log.Println("stopping new connections")
+
+		if err := listener.Close(); err != nil {
+			log.Printf("failed to close listener: %v", err)
+		}
+	}()
 
 	if err := runForwarder(listener, *remoteAddress); err != nil {
 		log.Fatalf("forwarder stopped: %v", err)
 	}
+
+	log.Println("waiting for active connections to finish")
+
+	log.Println("all connections finished")
+	log.Println("Portly stopped cleanly")
 }
 
 func runForwarder(listener net.Listener, remoteAddress string) error {
@@ -47,11 +71,18 @@ func runForwarder(listener net.Listener, remoteAddress string) error {
 	for { // we want to continuously listen for requests and not immediately end the function execution
 		client, err := listener.Accept()
 		if err != nil {
+			// don't return graceful shutdowns as errors
+			if errors.Is(err, net.ErrClosed) {
+				return nil
+			}
 			return fmt.Errorf("failed to accept connection: %v", err)
 		}
 
 		// Handle the actual forwarding to the remote
-		go handlePortForward(client, remoteAddress)
+		go func() {
+			handlePortForward(client, remoteAddress)
+		}()
+
 	}
 }
 
@@ -78,40 +109,65 @@ func handlePortForward(client net.Conn, remoteAddress string) {
 		remoteAddress,
 	)
 
-	// Buffered so both goroutines can report completion,
-	// even after this function begins returning.
-	done := make(chan error, 2)
-
 	// Requests are copied from the client to the target,
 	// and responses are copied from the target back to the client.
+
+	// Each direction reports its own error so a failure on one
+	// side can never be masked by a nil result from the other.
+	errClientToTarget := make(chan error, 1)
+	errTargetToClient := make(chan error, 1)
+
+	// STATS
+	sent := make(chan int, 1)
+	recieved := make(chan int, 1)
+	start := time.Now()
 
 	// Client request traffic:
 	// client -> target
 	go func() {
-		_, err := io.Copy(target, client)
-		done <- err
+		bytes, err := io.Copy(target, client)
+		sent <- int(bytes)
+		errClientToTarget <- err
 	}()
 
 	// Target response traffic:
 	// target -> client
 	go func() {
-		_, err := io.Copy(client, target)
-		done <- err
+		bytes, err := io.Copy(client, target)
+		recieved <- int(bytes)
+		errTargetToClient <- err
 	}()
 
-	copyErr := <-done
+	sentBytes := <-sent
+	receivedBytes := <-recieved
+	clientToTargetErr := <-errClientToTarget
+	targetToClientErr := <-errTargetToClient
+	duration := time.Since(start)
 
-	if copyErr != nil {
+	if clientToTargetErr != nil {
 		log.Printf(
-			"connection %s ended with an error: %v",
+			"client→target copy for %s ended with an error: %v",
 			client.RemoteAddr(),
-			copyErr,
+			clientToTargetErr,
 		)
 	}
 
+	if targetToClientErr != nil {
+		log.Printf(
+			"target→client copy for %s ended with an error: %v",
+			client.RemoteAddr(),
+			targetToClientErr,
+		)
+	}
+
+	// ------------- PRINTING STATS -------------
 	log.Printf(
 		"connection closed: %s → %s",
 		client.RemoteAddr(),
 		remoteAddress,
 	)
+
+	log.Printf("sent: %d", sentBytes)
+	log.Printf("received: %d", receivedBytes)
+	log.Printf("duration: %d ms", duration.Milliseconds())
 }
