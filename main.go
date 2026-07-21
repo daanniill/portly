@@ -98,7 +98,7 @@ func handlePortForward(client net.Conn, remoteAddress string) {
 
 	defer client.Close()
 
-	target, err := net.Dial("tcp", remoteAddress)
+	target, err := net.DialTimeout("tcp", remoteAddress, 5*time.Second)
 	if err != nil {
 		log.Printf(
 			"failed to connect client %s to target %s: %v",
