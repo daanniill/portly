@@ -27,8 +27,10 @@ func startTestForwarder(t *testing.T, targetAddress string) string {
 
 	errCh := make(chan error, 1)
 
+	var connections sync.WaitGroup
+
 	go func() {
-		errCh <- runForwarder(listener, targetAddress)
+		errCh <- runForwarder(listener, targetAddress, &connections)
 	}()
 
 	// free up resources after running tests
@@ -37,6 +39,7 @@ func startTestForwarder(t *testing.T, targetAddress string) string {
 		if err := listener.Close(); err != nil {
 			t.Errorf("failed to close listener: %v", err)
 		}
+		connections.Wait()
 	})
 
 	return listener.Addr().String() // returns address of where listener was opened on
