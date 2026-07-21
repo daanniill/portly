@@ -21,7 +21,7 @@ func main() {
 	// 127.0.0.1 is standard ip, basically localhost
 	localAddress := flag.String(
 		"listen",                     // name
-		"127.0.0.1:8080",             // default
+		"127.0.0.1:0",                // default, listen on any available port
 		"local address to listen on", //desc
 	)
 
@@ -42,7 +42,7 @@ func main() {
 		log.Fatalf("failed to listen on %s: %v", *localAddress, err)
 	}
 
-	log.Printf("Portly forwarding %s → %s", *localAddress, *remoteAddress)
+	log.Printf("Portly forwarding %s → %s", listener.Addr().String(), *remoteAddress)
 
 	go func() {
 		<-ctx.Done()
