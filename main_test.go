@@ -22,13 +22,15 @@ func startTestForwarder(t *testing.T, targetAddress string) string {
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0") // define a listener on any available port
 	if err != nil {
-		log.Fatalf("failed tocreate forwarder listener: %v", err)
+		log.Fatalf("failed to create forwarder listener: %v", err)
 	}
 
 	errCh := make(chan error, 1)
 
+	var connections sync.WaitGroup
+
 	go func() {
-		errCh <- runForwarder(listener, targetAddress)
+		errCh <- runForwarder(listener, targetAddress, &connections)
 	}()
 
 	// free up resources after running tests
@@ -37,6 +39,7 @@ func startTestForwarder(t *testing.T, targetAddress string) string {
 		if err := listener.Close(); err != nil {
 			t.Errorf("failed to close listener: %v", err)
 		}
+		connections.Wait()
 	})
 
 	return listener.Addr().String() // returns address of where listener was opened on
@@ -188,5 +191,34 @@ func TestForwarderHandlesConcurrentClients(t *testing.T) {
 
 	for err := range errCh {
 		t.Error(err)
+	}
+}
+
+func TestForwarderSurvivesUnavailableTarget(t *testing.T) {
+	// occupy a port with a listener then immediatley close it
+	listener, err := net.Listen("tcp", "127.0.0.1:0") // define a listener on any available port
+	if err != nil {
+		log.Fatalf("failed to create forwarder listener: %v", err)
+	}
+
+	unavailableTarget := listener.Addr().String()
+	// close the listener freeing the port
+	if err := listener.Close(); err != nil {
+		t.Fatalf("failed to close temporary target listener: %v", err)
+	}
+
+	// connect to the unavailable address
+	forwarderAddress := startTestForwarder(t, unavailableTarget)
+	client := newTestHTTPClient()
+
+	// Try twice. The requests should fail, but the forwarder listener
+	// should remain alive and accept the second connection.
+	for attempt := 1; attempt <= 2; attempt++ {
+		response, err := client.Get("http://" + forwarderAddress)
+
+		if err == nil {
+			response.Body.Close()
+			t.Fatalf("attempt %d unexpectedly succeeded with unavailable target", attempt)
+		}
 	}
 }

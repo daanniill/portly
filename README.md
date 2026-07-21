@@ -1,65 +1,66 @@
-# Welcome to Portly
+# Portly
 
-## The Big Picture
+Portly is a small TCP port forwarder. It listens on one address, opens a TCP
+connection to a target, and copies traffic in both directions. It currently
+supports **TCP only**.
 
-Portly is a simple port forwarder that sits between a client and a destination server.
+## Build
 
-```
-Client                  Forwarder                   Destination
-curl/browser             your Go program             web server
-     │                         │                          │
-     │──── connect :8080 ─────▶│                          │
-     │                         │──── connect :9000 ──────▶│
-     │                         │                          │
-     │──── request bytes ─────▶│──── request bytes ──────▶│
-     │◀─── response bytes ─────│◀──── response bytes ──────│
-```
+Requires Go 1.26.5 or newer (as declared in `go.mod`).
 
-- Important detail: the forwarder maintains two separate TCP connections:
-  1. Client & Forwarder
-  2. Forwarder & Destination
-
-## Usage
-
-Build the binary:
 ```bash
-go build -o portly
+go build -o portly .
 ```
 
-Run it with default settings (listens on `127.0.0.1:8080`, forwards to `127.0.0.1:9001`):
+## Run
+
+With no flags, Portly listens on `127.0.0.1:8080` and forwards to
+`127.0.0.1:9001`:
+
 ```bash
 ./portly
 ```
 
-Or run directly with `go run`:
+You can also run it without building a binary first:
+
 ```bash
-go run main.go
+go run .
 ```
 
-### Flags
+### Flags and examples
 
-| Flag      | Default            | Description                |
-|-----------|---------------------|----------------------------|
-| `-listen` | `127.0.0.1:8080`     | Local address to listen on |
-| `-target` | `127.0.0.1:9001`     | Remote address to forward to |
+| Flag | Default | Purpose |
+|---|---|---|
+| `-listen` | `127.0.0.1:8080` | Address Portly accepts connections on |
+| `-target` | `127.0.0.1:9001` | Address Portly forwards connections to |
 
-### Examples
-
-Forward local port `8080` to a server running on port `9000`:
 ```bash
+# Forward one local port to another
 ./portly -listen 127.0.0.1:8080 -target 127.0.0.1:9000
-```
 
-Expose the forwarder on all interfaces and forward to a remote host:
-```bash
+# Listen on every IPv4 interface and forward to another host
 ./portly -listen 0.0.0.0:8080 -target 192.168.1.50:9000
 ```
 
-Stop the forwarder gracefully with `Ctrl+C` (SIGINT) or `SIGTERM` — it stops accepting new connections and waits for active ones to finish before exiting.
+Stop Portly with `Ctrl+C` or `SIGTERM`. It stops accepting new connections and
+waits for active connections to finish.
 
-## Testing
+> **Security:** Listening on `0.0.0.0` exposes the port on every IPv4 network
+> interface and may make it reachable from your LAN or the internet, depending
+> on firewall and router settings. Portly provides no authentication or
+> encryption, so use a firewall and bind to `127.0.0.1` unless remote access is
+> intentional.
 
-Run:
-```bash
-go test
-```
+## Platforms
+
+Portly is tested on macOS. It uses Go's standard networking APIs and is expected
+to work on Linux and Windows, but those platforms are not currently tested.
+
+## Known limitations
+
+- TCP only; UDP is not supported.
+- No authentication, access control, or TLS termination.
+- One forwarding rule per process and no connection limit.
+- Shutdown waits indefinitely for active connections to close.
+
+Run the tests with `go test ./...`.
