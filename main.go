@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -44,6 +45,8 @@ func main() {
 
 	log.Printf("Portly forwarding %s → %s", *localAddress, *remoteAddress)
 
+	var connections sync.WaitGroup
+
 	go func() {
 		<-ctx.Done()
 
@@ -55,17 +58,19 @@ func main() {
 		}
 	}()
 
-	if err := runForwarder(listener, *remoteAddress); err != nil {
+	if err := runForwarder(listener, *remoteAddress, &connections); err != nil {
 		log.Fatalf("forwarder stopped: %v", err)
 	}
 
 	log.Println("waiting for active connections to finish")
 
+	connections.Wait()
+
 	log.Println("all connections finished")
 	log.Println("Portly stopped cleanly")
 }
 
-func runForwarder(listener net.Listener, remoteAddress string) error {
+func runForwarder(listener net.Listener, remoteAddress string, connections *sync.WaitGroup) error {
 	// Handler listening function
 	// will accept traffic at the bound port and run a goroutine as a non-blocking action to handle forwarding the request to the remote location
 	for { // we want to continuously listen for requests and not immediately end the function execution
@@ -78,8 +83,10 @@ func runForwarder(listener net.Listener, remoteAddress string) error {
 			return fmt.Errorf("failed to accept connection: %v", err)
 		}
 
+		connections.Add(1)
 		// Handle the actual forwarding to the remote
 		go func() {
+			defer connections.Done()
 			handlePortForward(client, remoteAddress)
 		}()
 
