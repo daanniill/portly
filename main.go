@@ -37,6 +37,29 @@ func (d *idleDeadline) refresh() error {
 	return d.target.SetDeadline(deadline)
 }
 
+// create a new struct that overwrites the read and write methods of net.Conn objects
+// idleTimeoutConn becomes a wrapper around a real network connection that automatically refreshes the idle timeout whenever data is read or written.
+type idleTimeoutConn struct {
+	net.Conn
+	deadline *idleDeadline
+}
+
+func (c *idleTimeoutConn) Read(buffer []byte) (int, error) {
+	if err := c.deadline.refresh(); err != nil {
+		return 0, err
+	}
+
+	return c.Conn.Read(buffer)
+}
+
+func (c *idleTimeoutConn) Write(buffer []byte) (int, error) {
+	if err := c.deadline.refresh(); err != nil {
+		return 0, err
+	}
+
+	return c.Conn.Write(buffer)
+}
+
 func main() {
 	log.Println("Start portly")
 
