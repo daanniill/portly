@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -274,5 +275,65 @@ func TestIdleTimeout(t *testing.T) {
 	buf := make([]byte, 1)
 	if _, err := target.Read(buf); err == nil {
 		t.Fatalf("expected connection to be closed after idle timeout, but read succeeded")
+	}
+}
+
+func TestForwarderDeadline(t *testing.T) {
+	// create a target test server using httptest
+	targetServer := httptest.NewServer(
+		// defining a handler function for this test server to handle http request
+		// w is used to construct the HTTP response sent back to the client.
+		// r contains information about the incoming request.
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Connection", "close") // close tcp connections when response finishes
+			w.WriteHeader(http.StatusOK)          // send 200 for succesful connections
+
+			if _, err := w.Write([]byte("concurrent response")); err != nil {
+				t.Errorf("failed to write target response: %v", err)
+			}
+		}),
+	)
+
+	defer targetServer.Close()
+
+	targetCfg := NewForwarderConfig()
+	targetCfg.targetAddress = getTargetAddress(t, targetServer.URL)
+	targetCfg.idleTimeout = 200 * time.Millisecond
+	forwarderAddress := startTestForwarder(t, targetCfg)
+
+	target, err := net.Dial("tcp", forwarderAddress)
+	if err != nil {
+		t.Fatalf("failed to dial forwarder: %v", err)
+	}
+	defer target.Close()
+
+	// Create a context that automatically cancels after 1 second
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	target.SetWriteDeadline(time.Now().Add(2 * time.Second))
+
+	loop:
+	for {
+		select {
+		case <-ctx.Done():
+			break loop
+		case <-ticker.C:
+			buf := make([]byte, 1)
+			if _, err := target.Write(buf); err != nil {
+				t.Fatalf("expected connection to be open")
+			}
+		}
+	}
+
+	time.Sleep(500 * time.Millisecond) // let idleTimeout (200ms) actually elapse
+
+	target.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 1)
+	if _, err := target.Read(buf); err == nil {
+		t.Fatalf("expected connection to be closed")
 	}
 }
