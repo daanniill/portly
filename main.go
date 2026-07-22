@@ -28,12 +28,10 @@ func (d *idleDeadline) refresh() error {
 
 	deadline := time.Now().Add(d.timeout)
 
-	// returns err if there is an issue with setting deadline of client
 	if err := d.client.SetDeadline(deadline); err != nil {
 		return err
 	}
 
-	// returns err if there is an issue with setting deadline of target
 	return d.target.SetDeadline(deadline)
 }
 

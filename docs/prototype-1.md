@@ -74,44 +74,98 @@ client <---------- target
 ```
 
 The copies run concurrently because TCP traffic can flow independently in both
-directions:
+directions. Each direction reports its outcome as a single `copyResult`
+(byte count, error, and which direction it was) on a shared channel, so the
+handler doesn't need to correlate separate byte/error channels per direction:
 
 ```go
-go io.Copy(target, client)
-go io.Copy(client, target)
+type copyResult struct {
+	bytes    int64
+	err      error
+	sentFlag bool
+}
+
+func copyConnection(done chan<- copyResult, destination io.Writer, source io.Reader, sent bool) {
+	bytesCopied, err := io.Copy(destination, source)
+	done <- copyResult{bytes: bytesCopied, err: err, sentFlag: sent}
+}
+
+done := make(chan copyResult, 2)
+go copyConnection(done, target, client, true)
+go copyConnection(done, client, target, false)
+
+first := <-done
+_ = client.Close()
+_ = target.Close()
+second := <-done
 ```
 
-A separate buffered channel records the byte count and error from each copy
-direction:
+The handler waits for the first direction to finish, then closes both
+connections to unblock whichever `io.Copy` is still running (e.g. the other
+side hasn't sent an EOF), then waits for its result too. `sentFlag` tells the
+handler which result is "sent" vs "received" regardless of which one arrives
+first, avoiding a bug where byte counts were previously misattributed based on
+channel arrival order.
+
+## Idle timeouts
+
+Long-lived but silent connections (e.g. a client that connects and never sends
+anything) would otherwise be held open forever. Portly closes a connection
+after `-idle-timeout` (default `5m`, `0` disables) has passed with no traffic
+in either direction.
+
+An `idleDeadline` holds the shared timeout and refreshes both the client and
+target connection's deadline together, since either side going idle should
+close the whole forwarded connection:
 
 ```go
-errClientToTarget := make(chan error, 1)
-errTargetToClient := make(chan error, 1)
-sent := make(chan int, 1)
-recieved := make(chan int, 1)
-start := time.Now()
+type idleDeadline struct {
+	timeout time.Duration
+	client  net.Conn
+	target  net.Conn
+}
 
-go func() {
-	bytes, err := io.Copy(target, client)
-	sent <- int(bytes)
-	errClientToTarget <- err
-}()
-
-go func() {
-	bytes, err := io.Copy(client, target)
-	recieved <- int(bytes)
-	errTargetToClient <- err
-}()
-
-sentBytes := <-sent
-receivedBytes := <-recieved
-clientToTargetErr := <-errClientToTarget
-targetToClientErr := <-errTargetToClient
-duration := time.Since(start)
+func (d *idleDeadline) refresh() error {
+	deadline := time.Now().Add(d.timeout)
+	if err := d.client.SetDeadline(deadline); err != nil {
+		return err
+	}
+	return d.target.SetDeadline(deadline)
+}
 ```
 
-The handler waits for both directions to finish, logs either direction's error,
-and reports the sent bytes, received bytes, and connection duration.
+`idleTimeoutConn` wraps a `net.Conn` so every `Read`/`Write` refreshes the
+deadline before touching the underlying connection. `client` and `target` are
+each wrapped before being passed into `copyConnection`, so traffic in either
+direction keeps the connection alive:
+
+```go
+type idleTimeoutConn struct {
+	conn     net.Conn
+	deadline *idleDeadline
+}
+
+func (c *idleTimeoutConn) Read(buffer []byte) (int, error) {
+	if err := c.deadline.refresh(); err != nil {
+		return 0, err
+	}
+	return c.conn.Read(buffer)
+}
+```
+
+When a copy fails because the deadline was exceeded, `isTimeout` distinguishes
+that from a normal disconnect so the log line reads "closed idle connection"
+instead of "connection closed":
+
+```go
+func isTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
+```
 
 ## Testing
 
