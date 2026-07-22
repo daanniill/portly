@@ -121,10 +121,10 @@ func main() {
 	}()
 
 	select {
-		case <-done: // if channel closes this case will run
-				log.Println("all connections finished")
-		case <-time.After(10 * time.Second):
-				log.Println("shutdown timeout exceeded, exiting with connections still active")
+	case <-done: // if channel closes this case will run
+		log.Println("all connections finished")
+	case <-time.After(10 * time.Second):
+		log.Println("shutdown timeout exceeded, exiting with connections still active")
 	}
 	log.Println("Portly stopped cleanly")
 }
@@ -228,7 +228,7 @@ func handlePortForward(client net.Conn, remoteAddress string, idleTimeout time.D
 
 	// ------------- PRINTING RESULTS -------------
 	if isTimeout(first.err) || isTimeout(second.err) {
-		log.Printf("closed idle connection: %s after %s", client.RemoteAddr().String(), remoteAddress)
+		log.Printf("closed idle connection: %s → %s after %s", client.RemoteAddr().String(), remoteAddress, duration.Round(time.Millisecond))
 	} else {
 		log.Printf("connection closed: %s → %s", client.RemoteAddr().String(), remoteAddress)
 	}
