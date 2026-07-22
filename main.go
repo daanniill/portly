@@ -17,12 +17,12 @@ import (
 
 type idleDeadline struct {
 	timeout time.Duration
-	client net.Conn
-	target net.Conn
+	client  net.Conn
+	target  net.Conn
 }
 
 func (d *idleDeadline) refresh() error {
-	if d.timeout <= 0{
+	if d.timeout <= 0 {
 		return nil
 	}
 
@@ -40,7 +40,7 @@ func (d *idleDeadline) refresh() error {
 // create a new struct that overwrites the read and write methods of net.Conn objects
 // idleTimeoutConn becomes a wrapper around a real network connection that automatically refreshes the idle timeout whenever data is read or written.
 type idleTimeoutConn struct {
-	conn net.Conn
+	conn     net.Conn
 	deadline *idleDeadline
 }
 
@@ -63,7 +63,7 @@ func (c *idleTimeoutConn) Write(buffer []byte) (int, error) {
 func main() {
 	log.Println("Start portly")
 
-	// ------- FLAGS ------- 
+	// ------- FLAGS -------
 	// 127.0.0.1 is standard ip, basically localhost
 	localAddress := flag.String(
 		"listen",                     // name
@@ -82,12 +82,12 @@ func main() {
 	)
 	flag.Parse()
 
-	//  ------- GRACEFUL SHUTDOWN ------- 
+	//  ------- GRACEFUL SHUTDOWN -------
 	// cancel contex when Ctrl+c or SIGTERM is received
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// ------- LISTENER ------- 
+	// ------- LISTENER -------
 	listener, err := net.Listen("tcp", *localAddress)
 	if err != nil {
 		log.Fatalf("failed to listen on %s: %v", *localAddress, err)
@@ -145,8 +145,8 @@ func runForwarder(listener net.Listener, remoteAddress string, connections *sync
 }
 
 type copyResult struct {
-	bytes int64
-	err error
+	bytes    int64
+	err      error
 	sentFlag bool
 }
 
@@ -181,18 +181,18 @@ func handlePortForward(client net.Conn, remoteAddress string, idleTimeout time.D
 	//initialize deadline
 	deadline := &idleDeadline{
 		timeout: idleTimeout,
-		client: client,
-		target: target,
+		client:  client,
+		target:  target,
 	}
 
 	// wrap client and target in new timeout structs
 	clientWithTimeout := &idleTimeoutConn{
-		conn: client,
+		conn:     client,
 		deadline: deadline,
 	}
 
 	targetWithTimeout := &idleTimeoutConn{
-		conn: target,
+		conn:     target,
 		deadline: deadline,
 	}
 
@@ -208,7 +208,7 @@ func handlePortForward(client net.Conn, remoteAddress string, idleTimeout time.D
 	go copyConnection(done, clientWithTimeout, targetWithTimeout, false)
 
 	first := <-done
-	
+
 	// Closing both connections wakes up the remaining io.Copy goroutine in case either client or target disconnects mid transfer
 	_ = client.Close()
 	_ = target.Close()
@@ -221,7 +221,7 @@ func handlePortForward(client net.Conn, remoteAddress string, idleTimeout time.D
 	if isTimeout(first.err) || isTimeout(second.err) {
 		log.Printf("closed idle connection: %s after %s", client.RemoteAddr().String(), remoteAddress)
 	} else {
-		log.Printf("connection closed: %s → %s", client.RemoteAddr().String() ,remoteAddress)
+		log.Printf("connection closed: %s → %s", client.RemoteAddr().String(), remoteAddress)
 	}
 
 	if first.sentFlag {
@@ -235,8 +235,8 @@ func copyConnection(done chan<- copyResult, destination io.Writer, source io.Rea
 	bytesCopied, err := io.Copy(destination, source)
 
 	done <- copyResult{
-		bytes: bytesCopied,
-		err: err,
+		bytes:    bytesCopied,
+		err:      err,
 		sentFlag: sent,
 	}
 }
@@ -246,6 +246,6 @@ func isTimeout(err error) bool {
 		return false
 	}
 
-	var netErr net.Error // net.Error is an interface for network-related errors
+	var netErr net.Error                               // net.Error is an interface for network-related errors
 	return errors.As(err, &netErr) && netErr.Timeout() // if the error is a net.Error store it in netErr, check if the error is a timeout error
 }
