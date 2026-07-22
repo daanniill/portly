@@ -40,7 +40,7 @@ func (d *idleDeadline) refresh() error {
 // create a new struct that overwrites the read and write methods of net.Conn objects
 // idleTimeoutConn becomes a wrapper around a real network connection that automatically refreshes the idle timeout whenever data is read or written.
 type idleTimeoutConn struct {
-	net.Conn
+	conn net.Conn
 	deadline *idleDeadline
 }
 
@@ -49,7 +49,7 @@ func (c *idleTimeoutConn) Read(buffer []byte) (int, error) {
 		return 0, err
 	}
 
-	return c.Conn.Read(buffer)
+	return c.conn.Read(buffer)
 }
 
 func (c *idleTimeoutConn) Write(buffer []byte) (int, error) {
@@ -57,7 +57,7 @@ func (c *idleTimeoutConn) Write(buffer []byte) (int, error) {
 		return 0, err
 	}
 
-	return c.Conn.Write(buffer)
+	return c.conn.Write(buffer)
 }
 
 func main() {
@@ -165,6 +165,7 @@ func handlePortForward(client net.Conn, remoteAddress string, idleTimeout time.D
 		)
 		return
 	}
+
 	defer target.Close()
 
 	log.Printf(
@@ -173,64 +174,55 @@ func handlePortForward(client net.Conn, remoteAddress string, idleTimeout time.D
 		remoteAddress,
 	)
 
-	// Each direction reports its own error so a failure on one
-	// side can never be masked by a nil result from the other.
-	errClientToTarget := make(chan error, 1)
-	errTargetToClient := make(chan error, 1)
+	// create an channel that stores the results from copy operations
+	done := make(chan copyResult, 2)
+
+	//initialize deadline
+	deadline := &idleDeadline{
+		timeout: idleTimeout,
+		client: client,
+		target: target,
+	}
+
+	// wrap client and target in new timeout structs
+	clientWithTimeout := &idleTimeoutConn{
+		conn: client,
+		deadline: deadline,
+	}
+
+	targetWithTimeout := &idleTimeoutConn{
+		conn: target,
+		deadline: deadline,
+	}
 
 	// STATS
-	sent := make(chan int, 1)
-	recieved := make(chan int, 1)
 	start := time.Now()
 
 	// Client request traffic:
 	// client -> target
-	go func() {
-		bytes, err := io.Copy(target, client)
-		sent <- int(bytes)
-		errClientToTarget <- err
-	}()
+	go copyConnection(done, targetWithTimeout, clientWithTimeout)
 
 	// Target response traffic:
 	// target -> client
-	go func() {
-		bytes, err := io.Copy(client, target)
-		recieved <- int(bytes)
-		errTargetToClient <- err
-	}()
+	go copyConnection(done, clientWithTimeout, targetWithTimeout)
 
-	sentBytes := <-sent
-	receivedBytes := <-recieved
-	clientToTargetErr := <-errClientToTarget
-	targetToClientErr := <-errTargetToClient
+	first := <-done
+	
+	// Closing both connections wakes up the remaining io.Copy goroutine in case either client or target disconnects mid transfer
+	_ = client.Close()
+	_ = target.Close()
+
+	second := <-done
+
 	duration := time.Since(start)
 
-	if clientToTargetErr != nil {
-		log.Printf(
-			"client→target copy for %s ended with an error: %v",
-			client.RemoteAddr(),
-			clientToTargetErr,
-		)
+	// ------------- PRINTING RESULTS -------------
+	if isTimeout(first.err) || isTimeout(second.err) {
+		log.Printf("closed idle connection: %s after %s", client.RemoteAddr().String(), remoteAddress)
+	} else {
+		log.Printf("connection closed: %s → %s", client.RemoteAddr().String() ,remoteAddress)
 	}
-
-	if targetToClientErr != nil {
-		log.Printf(
-			"target→client copy for %s ended with an error: %v",
-			client.RemoteAddr(),
-			targetToClientErr,
-		)
-	}
-
-	// ------------- PRINTING STATS -------------
-	log.Printf(
-		"connection closed: %s → %s",
-		client.RemoteAddr(),
-		remoteAddress,
-	)
-
-	log.Printf("sent: %d", sentBytes)
-	log.Printf("received: %d", receivedBytes)
-	log.Printf("duration: %d ms", duration.Milliseconds())
+	log.Printf("transferred: sent=%d bytes received=%d bytes duration: %d ms", first.bytes, second.bytes, duration.Milliseconds())
 }
 
 func copyConnection(done chan<- copyResult, destination io.Writer, source io.Reader) {
