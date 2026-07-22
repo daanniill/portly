@@ -147,6 +147,7 @@ func runForwarder(listener net.Listener, remoteAddress string, connections *sync
 type copyResult struct {
 	bytes int64
 	err error
+	sentFlag bool
 }
 
 // -------------------- handles the port forwarding logic --------------------
@@ -200,11 +201,11 @@ func handlePortForward(client net.Conn, remoteAddress string, idleTimeout time.D
 
 	// Client request traffic:
 	// client -> target
-	go copyConnection(done, targetWithTimeout, clientWithTimeout)
+	go copyConnection(done, targetWithTimeout, clientWithTimeout, true)
 
 	// Target response traffic:
 	// target -> client
-	go copyConnection(done, clientWithTimeout, targetWithTimeout)
+	go copyConnection(done, clientWithTimeout, targetWithTimeout, false)
 
 	first := <-done
 	
@@ -222,15 +223,21 @@ func handlePortForward(client net.Conn, remoteAddress string, idleTimeout time.D
 	} else {
 		log.Printf("connection closed: %s → %s", client.RemoteAddr().String() ,remoteAddress)
 	}
-	log.Printf("transferred: sent=%d bytes received=%d bytes duration: %d ms", first.bytes, second.bytes, duration.Milliseconds())
+
+	if first.sentFlag {
+		log.Printf("transferred: sent=%d bytes received=%d bytes duration: %d ms", first.bytes, second.bytes, duration.Milliseconds())
+	} else {
+		log.Printf("transferred: sent=%d bytes received=%d bytes duration: %d ms", second.bytes, first.bytes, duration.Milliseconds())
+	}
 }
 
-func copyConnection(done chan<- copyResult, destination io.Writer, source io.Reader) {
+func copyConnection(done chan<- copyResult, destination io.Writer, source io.Reader, sent bool) {
 	bytesCopied, err := io.Copy(destination, source)
 
 	done <- copyResult{
 		bytes: bytesCopied,
 		err: err,
+		sentFlag: sent,
 	}
 }
 
