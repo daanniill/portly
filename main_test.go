@@ -30,7 +30,7 @@ func startTestForwarder(t *testing.T, targetAddress string) string {
 	var connections sync.WaitGroup
 
 	go func() {
-		errCh <- runForwarder(listener, targetAddress, &connections)
+		errCh <- runForwarder(listener, targetAddress, &connections, 5*time.Second)
 	}()
 
 	// free up resources after running tests
