@@ -18,7 +18,7 @@ import (
 func main() {
 	log.Println("Start portly")
 
-	//define arguments
+	// ------- FLAGS ------- 
 	// 127.0.0.1 is standard ip, basically localhost
 	localAddress := flag.String(
 		"listen",                     // name
@@ -30,6 +30,12 @@ func main() {
 		"target",
 		"127.0.0.1:9001",
 		"remote address to target",
+	)
+
+	idleTimeout := flag.Duration(
+		"idle-timeout",
+		5*time.Minute,
+		"close a connection after this long with no traffic; 0 disables",
 	)
 
 	flag.Parse()
@@ -58,7 +64,7 @@ func main() {
 		}
 	}()
 
-	if err := runForwarder(listener, *remoteAddress, &connections); err != nil {
+	if err := runForwarder(listener, *remoteAddress, &connections, *idleTimeout); err != nil {
 		log.Fatalf("forwarder stopped: %v", err)
 	}
 
@@ -70,7 +76,7 @@ func main() {
 	log.Println("Portly stopped cleanly")
 }
 
-func runForwarder(listener net.Listener, remoteAddress string, connections *sync.WaitGroup) error {
+func runForwarder(listener net.Listener, remoteAddress string, connections *sync.WaitGroup, idleTimeout time.Duration) error {
 	// Handler listening function
 	// will accept traffic at the bound port and run a goroutine as a non-blocking action to handle forwarding the request to the remote location
 	for { // we want to continuously listen for requests and not immediately end the function execution
@@ -87,13 +93,13 @@ func runForwarder(listener net.Listener, remoteAddress string, connections *sync
 		// Handle the actual forwarding to the remote
 		go func() {
 			defer connections.Done()
-			handlePortForward(client, remoteAddress)
+			handlePortForward(client, remoteAddress, idleTimeout)
 		}()
 
 	}
 }
 
-func handlePortForward(client net.Conn, remoteAddress string) {
+func handlePortForward(client net.Conn, remoteAddress string, idleTimeout time.Duration) {
 	log.Printf("forwarding connection from client %s to target %s", client.RemoteAddr(), remoteAddress)
 
 	defer client.Close()
