@@ -112,9 +112,20 @@ func main() {
 
 	log.Println("waiting for active connections to finish")
 
-	connections.Wait()
+	// notifying channel that is used to show connections are closed
+	done := make(chan struct{}) // struct takes zero bytes of memory
 
-	log.Println("all connections finished")
+	go func() {
+		connections.Wait()
+		close(done) //close channel
+	}()
+
+	select {
+		case <-done: // if channel closes this case will run
+				log.Println("all connections finished")
+		case <-time.After(10 * time.Second):
+				log.Println("shutdown timeout exceeded, exiting with connections still active")
+	}
 	log.Println("Portly stopped cleanly")
 }
 
