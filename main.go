@@ -140,7 +140,7 @@ func runForwarder(listener net.Listener, remoteAddress string, connections *sync
 			if errors.Is(err, net.ErrClosed) {
 				return nil
 			}
-			return fmt.Errorf("failed to accept connection: %v", err)
+			return fmt.Errorf("failed to accept connection: %w", err)
 		}
 
 		connections.Add(1)
