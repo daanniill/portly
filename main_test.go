@@ -13,11 +13,23 @@ import (
 	"time"
 )
 
+type ForwarderConfig struct {
+	targetAddress string
+	idleTimeout   time.Duration
+}
+
+func NewForwarderConfig() ForwarderConfig {
+	return ForwarderConfig{
+		targetAddress: "http://127.0.0.1:9001",
+		idleTimeout:   2 * time.Second,
+	}
+}
+
 // startTestForwarder starts the forwarder on an automatically selected port.
 //
 // Using port 0 tells the operating system to choose an available port,
 // which prevents test failures caused by ports already being occupied.
-func startTestForwarder(t *testing.T, targetAddress string) string {
+func startTestForwarder(t *testing.T, forwarderCfg ForwarderConfig) string {
 	t.Helper() // mark this function as a helper
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0") // define a listener on any available port
@@ -30,7 +42,7 @@ func startTestForwarder(t *testing.T, targetAddress string) string {
 	var connections sync.WaitGroup
 
 	go func() {
-		errCh <- runForwarder(listener, targetAddress, &connections, 5*time.Second)
+		errCh <- runForwarder(listener, forwarderCfg.targetAddress, &connections, forwarderCfg.idleTimeout)
 	}()
 
 	// free up resources after running tests
@@ -87,8 +99,9 @@ func TestForwarderForwardsHTTPResponse(t *testing.T) {
 
 	defer targetServer.Close()
 
-	targetAddress := getTargetAddress(t, targetServer.URL)
-	forwarderAddress := startTestForwarder(t, targetAddress)
+	targetCfg := NewForwarderConfig()
+	targetCfg.targetAddress = getTargetAddress(t, targetServer.URL)
+	forwarderAddress := startTestForwarder(t, targetCfg)
 
 	// initialize a client to send http requests
 	client := newTestHTTPClient()
@@ -142,8 +155,9 @@ func TestForwarderHandlesConcurrentClients(t *testing.T) {
 
 	defer targetServer.Close()
 
-	targetAddress := getTargetAddress(t, targetServer.URL)
-	forwarderAddress := startTestForwarder(t, targetAddress)
+	targetCfg := NewForwarderConfig()
+	targetCfg.targetAddress = getTargetAddress(t, targetServer.URL)
+	forwarderAddress := startTestForwarder(t, targetCfg)
 
 	const requestCount = 50
 
@@ -208,7 +222,10 @@ func TestForwarderSurvivesUnavailableTarget(t *testing.T) {
 	}
 
 	// connect to the unavailable address
-	forwarderAddress := startTestForwarder(t, unavailableTarget)
+
+	unavailableTargetCfg := NewForwarderConfig()
+	unavailableTargetCfg.targetAddress = unavailableTarget
+	forwarderAddress := startTestForwarder(t, unavailableTargetCfg)
 	client := newTestHTTPClient()
 
 	// Try twice. The requests should fail, but the forwarder listener
@@ -220,5 +237,42 @@ func TestForwarderSurvivesUnavailableTarget(t *testing.T) {
 			response.Body.Close()
 			t.Fatalf("attempt %d unexpectedly succeeded with unavailable target", attempt)
 		}
+	}
+}
+
+func TestIdleTimeout(t *testing.T) {
+	// create a target test server using httptest
+	targetServer := httptest.NewServer(
+		// defining a handler function for this test server to handle http request
+		// w is used to construct the HTTP response sent back to the client.
+		// r contains information about the incoming request.
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Connection", "close") // close tcp connections when response finishes
+			w.WriteHeader(http.StatusOK)          // send 200 for succesful connections
+
+			if _, err := w.Write([]byte("concurrent response")); err != nil {
+				t.Errorf("failed to write target response: %v", err)
+			}
+		}),
+	)
+
+	defer targetServer.Close()
+
+	targetCfg := NewForwarderConfig()
+	targetCfg.targetAddress = getTargetAddress(t, targetServer.URL)
+	forwarderAddress := startTestForwarder(t, targetCfg)
+
+	target, err := net.Dial("tcp", forwarderAddress)
+	if err != nil {
+		t.Fatalf("failed to dial forwarder: %v", err)
+	}
+	defer target.Close()
+
+	time.Sleep(3 * time.Second)
+
+	target.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 1)
+	if _, err := target.Read(buf); err == nil {
+		t.Fatalf("expected connection to be closed after idle timeout, but read succeeded")
 	}
 }
