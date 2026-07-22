@@ -120,6 +120,7 @@ func main() {
 	log.Println("Portly stopped cleanly")
 }
 
+// -------------------- runs the forwarder  --------------------
 func runForwarder(listener net.Listener, remoteAddress string, connections *sync.WaitGroup, idleTimeout time.Duration) error {
 	// Handler listening function
 	// will accept traffic at the bound port and run a goroutine as a non-blocking action to handle forwarding the request to the remote location
@@ -143,6 +144,12 @@ func runForwarder(listener net.Listener, remoteAddress string, connections *sync
 	}
 }
 
+type copyResult struct {
+	bytes int64
+	err error
+}
+
+// -------------------- handles the port forwarding logic --------------------
 func handlePortForward(client net.Conn, remoteAddress string, idleTimeout time.Duration) {
 	log.Printf("forwarding connection from client %s to target %s", client.RemoteAddr(), remoteAddress)
 
@@ -165,9 +172,6 @@ func handlePortForward(client net.Conn, remoteAddress string, idleTimeout time.D
 		client.RemoteAddr(),
 		remoteAddress,
 	)
-
-	// Requests are copied from the client to the target,
-	// and responses are copied from the target back to the client.
 
 	// Each direction reports its own error so a failure on one
 	// side can never be masked by a nil result from the other.
@@ -227,4 +231,22 @@ func handlePortForward(client net.Conn, remoteAddress string, idleTimeout time.D
 	log.Printf("sent: %d", sentBytes)
 	log.Printf("received: %d", receivedBytes)
 	log.Printf("duration: %d ms", duration.Milliseconds())
+}
+
+func copyConnection(done chan<- copyResult, destination io.Writer, source io.Reader) {
+	bytesCopied, err := io.Copy(destination, source)
+
+	done <- copyResult{
+		bytes: bytesCopied,
+		err: err,
+	}
+}
+
+func isTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var netErr net.Error // net.Error is an interface for network-related errors
+	return errors.As(err, &netErr) && netErr.Timeout() // if the error is a net.Error store it in netErr, check if the error is a timeout error
 }
