@@ -15,6 +15,28 @@ import (
 	"time"
 )
 
+type idleDeadline struct {
+	timeout time.Duration
+	client net.Conn
+	target net.Conn
+}
+
+func (d *idleDeadline) refresh() error {
+	if d.timeout <= 0{
+		return nil
+	}
+
+	deadline := time.Now().Add(d.timeout)
+
+	// returns err if there is an issue with setting deadline of client
+	if err := d.client.SetDeadline(deadline); err != nil {
+		return err
+	}
+
+	// returns err if there is an issue with setting deadline of target
+	return d.target.SetDeadline(deadline)
+}
+
 func main() {
 	log.Println("Start portly")
 
@@ -25,25 +47,24 @@ func main() {
 		"127.0.0.1:0",                // default, listen on any available port
 		"local address to listen on", //desc
 	)
-
 	remoteAddress := flag.String(
 		"target",
 		"127.0.0.1:9001",
 		"remote address to target",
 	)
-
 	idleTimeout := flag.Duration(
 		"idle-timeout",
 		5*time.Minute,
 		"close a connection after this long with no traffic; 0 disables",
 	)
-
 	flag.Parse()
 
+	//  ------- GRACEFUL SHUTDOWN ------- 
 	// cancel contex when Ctrl+c or SIGTERM is received
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// ------- LISTENER ------- 
 	listener, err := net.Listen("tcp", *localAddress)
 	if err != nil {
 		log.Fatalf("failed to listen on %s: %v", *localAddress, err)
