@@ -33,6 +33,7 @@ go run .
 |---|---|---|
 | `-listen` | `127.0.0.1:8080` | Address Portly accepts connections on |
 | `-target` | `127.0.0.1:9001` | Address Portly forwards connections to |
+| `-idle-timeout` | `5m` | Close a connection after this long with no traffic in either direction; `0` disables |
 
 ```bash
 # Forward one local port to another
@@ -40,6 +41,10 @@ go run .
 
 # Listen on every IPv4 interface and forward to another host
 ./portly -listen 0.0.0.0:8080 -target 192.168.1.50:9000
+
+# Close connections after 30 seconds of no traffic, or disable idle timeouts entirely
+./portly -idle-timeout 30s
+./portly -idle-timeout 0
 ```
 
 Stop Portly with `Ctrl+C` or `SIGTERM`. It stops accepting new connections and
