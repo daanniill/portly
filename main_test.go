@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -30,7 +32,7 @@ func NewForwarderConfig() ForwarderConfig {
 //
 // Using port 0 tells the operating system to choose an available port,
 // which prevents test failures caused by ports already being occupied.
-func startTestForwarder(t *testing.T, forwarderCfg ForwarderConfig) string {
+func startTestForwarder(t *testing.T, forwarderCfg ForwarderConfig) net.Listener {
 	t.Helper() // mark this function as a helper
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0") // define a listener on any available port
@@ -48,14 +50,15 @@ func startTestForwarder(t *testing.T, forwarderCfg ForwarderConfig) string {
 
 	// free up resources after running tests
 	t.Cleanup(func() {
-		// check if listener closed succesfully
-		if err := listener.Close(); err != nil {
+		// tests may have already closed the listener themselves (e.g. to
+		// simulate a shutdown signal), so ignore an already-closed listener
+		if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 			t.Errorf("failed to close listener: %v", err)
 		}
 		connections.Wait()
 	})
 
-	return listener.Addr().String() // returns address of where listener was opened on
+	return listener // returns listener
 }
 
 // getTargetAddress extracts "127.0.0.1:port" from an httptest URL.
@@ -102,7 +105,7 @@ func TestForwarderForwardsHTTPResponse(t *testing.T) {
 
 	targetCfg := NewForwarderConfig()
 	targetCfg.targetAddress = getTargetAddress(t, targetServer.URL)
-	forwarderAddress := startTestForwarder(t, targetCfg)
+	forwarderAddress := startTestForwarder(t, targetCfg).Addr().String()
 
 	// initialize a client to send http requests
 	client := newTestHTTPClient()
@@ -158,7 +161,7 @@ func TestForwarderHandlesConcurrentClients(t *testing.T) {
 
 	targetCfg := NewForwarderConfig()
 	targetCfg.targetAddress = getTargetAddress(t, targetServer.URL)
-	forwarderAddress := startTestForwarder(t, targetCfg)
+	forwarderAddress := startTestForwarder(t, targetCfg).Addr().String()
 
 	const requestCount = 50
 
@@ -226,7 +229,7 @@ func TestForwarderSurvivesUnavailableTarget(t *testing.T) {
 
 	unavailableTargetCfg := NewForwarderConfig()
 	unavailableTargetCfg.targetAddress = unavailableTarget
-	forwarderAddress := startTestForwarder(t, unavailableTargetCfg)
+	forwarderAddress := startTestForwarder(t, unavailableTargetCfg).Addr().String()
 	client := newTestHTTPClient()
 
 	// Try twice. The requests should fail, but the forwarder listener
@@ -261,7 +264,7 @@ func TestIdleTimeout(t *testing.T) {
 
 	targetCfg := NewForwarderConfig()
 	targetCfg.targetAddress = getTargetAddress(t, targetServer.URL)
-	forwarderAddress := startTestForwarder(t, targetCfg)
+	forwarderAddress := startTestForwarder(t, targetCfg).Addr().String()
 
 	target, err := net.Dial("tcp", forwarderAddress)
 	if err != nil {
@@ -299,7 +302,7 @@ func TestForwarderDeadline(t *testing.T) {
 	targetCfg := NewForwarderConfig()
 	targetCfg.targetAddress = getTargetAddress(t, targetServer.URL)
 	targetCfg.idleTimeout = 200 * time.Millisecond
-	forwarderAddress := startTestForwarder(t, targetCfg)
+	forwarderAddress := startTestForwarder(t, targetCfg).Addr().String()
 
 	target, err := net.Dial("tcp", forwarderAddress)
 	if err != nil {
@@ -316,7 +319,7 @@ func TestForwarderDeadline(t *testing.T) {
 
 	target.SetWriteDeadline(time.Now().Add(2 * time.Second))
 
-	loop:
+loop:
 	for {
 		select {
 		case <-ctx.Done():
@@ -335,5 +338,94 @@ func TestForwarderDeadline(t *testing.T) {
 	buf := make([]byte, 1)
 	if _, err := target.Read(buf); err == nil {
 		t.Fatalf("expected connection to be closed")
+	}
+}
+
+// TestForwarderGracefulShutdown checks that closing the listener (as happens
+// on a shutdown signal) stops runForwarder cleanly while letting an
+// already in-flight connection finish instead of killing it.
+func TestForwarderGracefulShutdown(t *testing.T) {
+	// signals that the target has received the request, proving the
+	// connection has actually been accepted and forwarded end-to-end
+	// (not just sitting in the OS accept backlog) before we close the
+	// listener below
+	requestReceived := make(chan struct{})
+	// holds the target's response until the test says it's safe to send it,
+	// so the connection is genuinely in flight when we simulate shutdown
+	releaseResponse := make(chan struct{})
+
+	// create a target test server using httptest
+	targetServer := httptest.NewServer(
+		// defining a handler function for this test server to handle http request
+		// w is used to construct the HTTP response sent back to the client.
+		// r contains information about the incoming request.
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			close(requestReceived)
+			<-releaseResponse
+
+			w.Header().Set("Connection", "close") // close tcp connections when response finishes
+			w.WriteHeader(http.StatusOK)          // send 200 for succesful connections
+
+			if _, err := w.Write([]byte("concurrent response")); err != nil {
+				t.Errorf("failed to write target response: %v", err)
+			}
+		}),
+	)
+
+	defer targetServer.Close()
+
+	targetCfg := NewForwarderConfig()
+	targetCfg.targetAddress = getTargetAddress(t, targetServer.URL)
+	targetCfg.idleTimeout = 200 * time.Millisecond
+	forwarder := startTestForwarder(t, targetCfg)
+	forwarderAddress := forwarder.Addr().String()
+
+	target, err := net.Dial("tcp", forwarderAddress)
+	if err != nil {
+		t.Fatalf("failed to dial forwarder: %v", err)
+	}
+	defer target.Close()
+
+	// start a request but don't read the response yet, so the connection
+	// is still in flight when we simulate the shutdown signal below
+	if _, err := target.Write([]byte("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")); err != nil {
+		t.Fatalf("failed to write request: %v", err)
+	}
+
+	// wait until the target has actually seen the request, so we know the
+	// connection was accepted and forwarded before we close the listener
+	<-requestReceived
+
+	// simulate a shutdown signal: stop accepting new connections
+	if err := forwarder.Close(); err != nil {
+		t.Fatalf("failed to close listener: %v", err)
+	}
+
+	// let the target finish responding now that shutdown has been triggered
+	close(releaseResponse)
+
+	// the already-accepted connection above should still be served in full
+	resp, err := http.ReadResponse(bufio.NewReader(target), nil)
+	if err != nil {
+		t.Fatalf("in-flight request failed after shutdown: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+	if string(body) != "concurrent response" {
+		t.Errorf("expected body %q, got %q", "concurrent response", body)
+	}
+
+	// but a brand new connection should now be rejected
+	if conn, err := net.Dial("tcp", forwarderAddress); err == nil {
+		conn.Close()
+		t.Fatalf("expected new connections to be rejected after shutdown")
 	}
 }
