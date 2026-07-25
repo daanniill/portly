@@ -14,6 +14,16 @@ import (
 	"github.com/daanniill/portly/internal/forwarder"
 )
 
+// defining a forwarder type
+type Forwarder struct {
+	ListenAddress  string
+	TargetAddress  string
+	DialTimeout    time.Duration
+	IdleTimeout    time.Duration
+	ShutdownTimeout time.Duration
+}
+
+
 func main() {
 	log.Println("Start portly")
 
