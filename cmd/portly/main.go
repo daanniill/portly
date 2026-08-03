@@ -52,16 +52,7 @@ func main() {
 
 	var connections sync.WaitGroup
 
-	go func() {
-		<-ctx.Done()
-
-		log.Println("shutdown signal received")
-		log.Println("stopping new connections")
-
-		if err := listener.Close(); err != nil {
-			log.Printf("failed to close listener: %v", err)
-		}
-	}()
+	go closeListenerOnShutdown(ctx, listener)
 
 	f := &forwarder.Forwarder{
 		TargetAddress: *remoteAddress,
@@ -89,4 +80,15 @@ func main() {
 		log.Println("shutdown timeout exceeded, exiting with connections still active")
 	}
 	log.Println("Portly stopped cleanly")
+}
+
+func closeListenerOnShutdown(ctx context.Context, listener net.Listener) {
+	<-ctx.Done()
+
+		log.Println("shutdown signal received")
+		log.Println("stopping new connections")
+
+		if err := listener.Close(); err != nil {
+			log.Printf("failed to close listener: %v", err)
+		}
 }

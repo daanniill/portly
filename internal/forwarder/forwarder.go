@@ -37,6 +37,3 @@ func (f *Forwarder) Run(listener net.Listener, connections *sync.WaitGroup) erro
 	}
 }
 
-
-
-
