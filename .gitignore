@@ -6,12 +6,9 @@ __pycache__/
 # Go
 *.exe
 *.test
+portly
 
 # OS / editor
 .DS_Store
 .vscode/
 .idea/
-
-
-# go
-portly

@@ -1,17 +1,10 @@
-package main
+package forwarder
 
 import (
-	"context"
 	"errors"
-	"flag"
-	"fmt"
 	"io"
 	"log"
 	"net"
-	"os"
-	"os/signal"
-	"sync"
-	"syscall"
 	"time"
 )
 
@@ -35,13 +28,14 @@ func (d *idleDeadline) refresh() error {
 	return d.target.SetDeadline(deadline)
 }
 
-// create a new struct that overwrites the read and write methods of net.Conn objects
+// create a new struct that wraps conn objects and overwrites the read and write methods of net.Conn objects
 // idleTimeoutConn becomes a wrapper around a real network connection that automatically refreshes the idle timeout whenever data is read or written.
 type idleTimeoutConn struct {
 	conn     net.Conn
 	deadline *idleDeadline
 }
 
+// read but with refresh
 func (c *idleTimeoutConn) Read(buffer []byte) (int, error) {
 	if err := c.deadline.refresh(); err != nil {
 		return 0, err
@@ -50,107 +44,13 @@ func (c *idleTimeoutConn) Read(buffer []byte) (int, error) {
 	return c.conn.Read(buffer)
 }
 
+// write but with refresh
 func (c *idleTimeoutConn) Write(buffer []byte) (int, error) {
 	if err := c.deadline.refresh(); err != nil {
 		return 0, err
 	}
 
 	return c.conn.Write(buffer)
-}
-
-func main() {
-	log.Println("Start portly")
-
-	// ------- FLAGS -------
-	// 127.0.0.1 is standard ip, basically localhost
-	localAddress := flag.String(
-		"listen",                     // name
-		"127.0.0.1:0",                // default, listen on any available port
-		"local address to listen on", //desc
-	)
-	remoteAddress := flag.String(
-		"target",
-		"127.0.0.1:9001",
-		"remote address to target",
-	)
-	idleTimeout := flag.Duration(
-		"idle-timeout",
-		5*time.Minute,
-		"close a connection after this long with no traffic; 0 disables",
-	)
-	flag.Parse()
-
-	//  ------- GRACEFUL SHUTDOWN -------
-	// cancel contex when Ctrl+c or SIGTERM is received
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	// ------- LISTENER -------
-	listener, err := net.Listen("tcp", *localAddress)
-	if err != nil {
-		log.Fatalf("failed to listen on %s: %v", *localAddress, err)
-	}
-
-	log.Printf("Portly forwarding %s → %s", listener.Addr().String(), *remoteAddress)
-
-	var connections sync.WaitGroup
-
-	go func() {
-		<-ctx.Done()
-
-		log.Println("shutdown signal received")
-		log.Println("stopping new connections")
-
-		if err := listener.Close(); err != nil {
-			log.Printf("failed to close listener: %v", err)
-		}
-	}()
-
-	if err := runForwarder(listener, *remoteAddress, &connections, *idleTimeout); err != nil {
-		log.Fatalf("forwarder stopped: %v", err)
-	}
-
-	log.Println("waiting for active connections to finish")
-
-	// notifying channel that is used to show connections are closed
-	done := make(chan struct{}) // struct takes zero bytes of memory
-
-	go func() {
-		connections.Wait()
-		close(done) //close channel
-	}()
-
-	select {
-	case <-done: // if channel closes this case will run
-		log.Println("all connections finished")
-	case <-time.After(10 * time.Second):
-		log.Println("shutdown timeout exceeded, exiting with connections still active")
-	}
-	log.Println("Portly stopped cleanly")
-}
-
-// -------------------- runs the forwarder  --------------------
-func runForwarder(listener net.Listener, remoteAddress string, connections *sync.WaitGroup, idleTimeout time.Duration) error {
-	// Handler listening function
-	// will accept traffic at the bound port and run a goroutine as a non-blocking action to handle forwarding the request to the remote location
-	for { // we want to continuously listen for requests and not immediately end the function execution
-		client, err := listener.Accept()
-		if err != nil {
-			// don't return graceful shutdowns as errors
-			if errors.Is(err, net.ErrClosed) {
-				return nil
-			}
-			return fmt.Errorf("failed to accept connection: %w", err)
-		}
-
-		connections.Add(1)
-		// Handle the actual forwarding to the remote
-		go func() {
-			defer connections.Done()
-			handlePortForward(client, remoteAddress, idleTimeout)
-		}()
-
-	}
 }
 
 type copyResult struct {
