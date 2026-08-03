@@ -9,13 +9,13 @@ supports **TCP only**.
 Requires Go 1.26.5 or newer (as declared in `go.mod`).
 
 ```bash
-go build -o portly .
+go build -o portly ./cmd/portly
 ```
 
 ## Run
 
-With no flags, Portly listens on `127.0.0.1:8080` and forwards to
-`127.0.0.1:9001`:
+With no flags, Portly listens on an OS-assigned port on `127.0.0.1` (printed
+at startup) and forwards to `127.0.0.1:9001`:
 
 ```bash
 ./portly
@@ -24,14 +24,14 @@ With no flags, Portly listens on `127.0.0.1:8080` and forwards to
 You can also run it without building a binary first:
 
 ```bash
-go run .
+go run ./cmd/portly
 ```
 
 ### Flags and examples
 
 | Flag | Default | Purpose |
 |---|---|---|
-| `-listen` | `127.0.0.1:8080` | Address Portly accepts connections on |
+| `-listen` | `127.0.0.1:0` | Address Portly accepts connections on (`:0` picks any available port) |
 | `-target` | `127.0.0.1:9001` | Address Portly forwards connections to |
 | `-idle-timeout` | `5m` | Close a connection after this long with no traffic in either direction; `0` disables |
 
@@ -66,6 +66,7 @@ to work on Linux and Windows, but those platforms are not currently tested.
 - TCP only; UDP is not supported.
 - No authentication, access control, or TLS termination.
 - One forwarding rule per process and no connection limit.
-- Shutdown waits indefinitely for active connections to close.
+- Shutdown waits up to 10 seconds for active connections to finish, then exits
+  even if some are still active.
 
 Run the tests with `go test ./...`.
