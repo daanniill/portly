@@ -6,6 +6,7 @@ __pycache__/
 # Go
 *.exe
 *.test
+portly
 
 # OS / editor
 .DS_Store
