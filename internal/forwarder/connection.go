@@ -44,7 +44,7 @@ func (c *idleTimeoutConn) Read(buffer []byte) (int, error) {
 	return c.conn.Read(buffer)
 }
 
-//write but with refresh
+// write but with refresh
 func (c *idleTimeoutConn) Write(buffer []byte) (int, error) {
 	if err := c.deadline.refresh(); err != nil {
 		return 0, err
@@ -158,6 +158,3 @@ func isTimeout(err error) bool {
 	var netErr net.Error                               // net.Error is an interface for network-related errors
 	return errors.As(err, &netErr) && netErr.Timeout() // if the error is a net.Error store it in netErr, check if the error is a timeout error
 }
-
-
-

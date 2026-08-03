@@ -10,8 +10,8 @@ import (
 
 // defining a forwarder type
 type Forwarder struct {
-	TargetAddress  string
-	IdleTimeout    time.Duration
+	TargetAddress string
+	IdleTimeout   time.Duration
 }
 
 func (f *Forwarder) Run(listener net.Listener, connections *sync.WaitGroup) error {
@@ -36,4 +36,3 @@ func (f *Forwarder) Run(listener net.Listener, connections *sync.WaitGroup) erro
 
 	}
 }
-

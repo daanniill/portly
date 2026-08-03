@@ -14,7 +14,6 @@ import (
 	"github.com/daanniill/portly/internal/forwarder"
 )
 
-
 func main() {
 	log.Println("Start portly")
 
@@ -85,10 +84,10 @@ func main() {
 func closeListenerOnShutdown(ctx context.Context, listener net.Listener) {
 	<-ctx.Done()
 
-		log.Println("shutdown signal received")
-		log.Println("stopping new connections")
+	log.Println("shutdown signal received")
+	log.Println("stopping new connections")
 
-		if err := listener.Close(); err != nil {
-			log.Printf("failed to close listener: %v", err)
-		}
+	if err := listener.Close(); err != nil {
+		log.Printf("failed to close listener: %v", err)
+	}
 }
