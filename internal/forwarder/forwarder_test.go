@@ -44,8 +44,13 @@ func startTestForwarder(t *testing.T, forwarderCfg ForwarderConfig) net.Listener
 
 	var connections sync.WaitGroup
 
+	f := &Forwarder{
+		TargetAddress: forwarderCfg.targetAddress,
+		IdleTimeout:   forwarderCfg.idleTimeout,
+	}
+
 	go func() {
-		errCh <- RunForwarder(listener, forwarderCfg.targetAddress, &connections, forwarderCfg.idleTimeout)
+		errCh <- f.Run(listener, &connections)
 	}()
 
 	// free up resources after running tests

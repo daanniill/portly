@@ -1,7 +1,6 @@
 package forwarder
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -11,19 +10,11 @@ import (
 
 // defining a forwarder type
 type Forwarder struct {
-	ListenAddress  string
 	TargetAddress  string
-	DialTimeout    time.Duration
 	IdleTimeout    time.Duration
-	ShutdownTimeout time.Duration
 }
 
-func (f *Forwarder) Run(ctx context.Context) error {
-	
-}
-
-// -------------------- runs the forwarder  --------------------
-func RunForwarder(listener net.Listener, remoteAddress string, connections *sync.WaitGroup, idleTimeout time.Duration) error {
+func (f *Forwarder) Run(listener net.Listener, connections *sync.WaitGroup) error {
 	// Handler listening function
 	// will accept traffic at the bound port and run a goroutine as a non-blocking action to handle forwarding the request to the remote location
 	for { // we want to continuously listen for requests and not immediately end the function execution
@@ -40,11 +31,12 @@ func RunForwarder(listener net.Listener, remoteAddress string, connections *sync
 		// Handle the actual forwarding to the remote
 		go func() {
 			defer connections.Done()
-			handlePortForward(client, remoteAddress, idleTimeout)
+			handlePortForward(client, f.TargetAddress, f.IdleTimeout)
 		}()
 
 	}
 }
+
 
 
 

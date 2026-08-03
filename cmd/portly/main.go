@@ -63,7 +63,12 @@ func main() {
 		}
 	}()
 
-	if err := forwarder.RunForwarder(listener, *remoteAddress, &connections, *idleTimeout); err != nil {
+	f := &forwarder.Forwarder{
+		TargetAddress: *remoteAddress,
+		IdleTimeout:   *idleTimeout,
+	}
+
+	if err := f.Run(listener, &connections); err != nil {
 		log.Fatalf("forwarder stopped: %v", err)
 	}
 
