@@ -91,12 +91,14 @@ func validateRule(rule Rule) (RuntimeRule, error) {
 		return RuntimeRule{}, fmt.Errorf("target address is required")
 	}
 
+	// if listen and target addresses are the same raise error
 	if rule.Listen == rule.Target {
 		return RuntimeRule{}, fmt.Errorf("listen and target addresses cannot be identical")
 	}
 
 	idleTimeout := 5 * time.Minute
 
+	// if timeout in config is not empty, parse given timeout into time.duration
 	if rule.IdleTimeout != "" {
 		parsedTimeout, err := time.ParseDuration(rule.IdleTimeout)
 
