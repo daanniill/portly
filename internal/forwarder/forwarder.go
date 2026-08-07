@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/daanniill/portly/internal/config"
 )
@@ -16,11 +17,17 @@ type Forwarder struct {
 
 	listener net.Listener
 	connections sync.WaitGroup
+
+	// closed by Wait() once the shutdown timeout elapses, telling any
+	// still-active connection goroutines to close their client conn now
+	// instead of waiting for traffic to finish on its own.
+	shutdown chan struct{}
 }
 
 func New(rule config.RuntimeRule) *Forwarder {
 	return &Forwarder{
-		rule: rule,
+		rule:     rule,
+		shutdown: make(chan struct{}),
 	}
 }
 
@@ -79,13 +86,44 @@ func (f *Forwarder) acceptConnections() error {
 		// Handle the actual forwarding to the remote
 		go func() {
 			defer f.connections.Done()
+
+			// force-close the client conn if shutdown fires before this
+			// connection finishes on its own; this unblocks the io.Copy
+			// calls in handlePortForward so it can return.
+			forwardDone := make(chan struct{})
+			go func() {
+				select {
+				case <-f.shutdown:
+					client.Close()
+				case <-forwardDone:
+				}
+			}()
+
 			handlePortForward(f.rule.Name, client, f.rule.Target, f.rule.IdleTimeout)
+			close(forwardDone)
 		}()
 	}
 }
 
 func (f *Forwarder) Wait() {
-	f.connections.Wait()
+	// notifying channel that is used to show connections are closed
+	done := make(chan struct{}) // struct takes zero bytes of memory
 
-	log.Printf("rule %q has no remaining active connections", f.rule.Name)
+	go func() {
+		f.connections.Wait()
+		close(done) //close channel
+	}()
+
+	select {
+	case <-done: // if channel closes this case will run
+		log.Printf("rule %q has no remaining active connections", f.rule.Name)
+		return
+	case <-time.After(10 * time.Second):
+		log.Printf("rule %q shutdown timeout exceeded, closing remaining active connections", f.rule.Name)
+	}
+
+	close(f.shutdown)
+
+	<-done // wait on the same WaitGroup-backed channel until the forced closes drain
+	log.Printf("rule %q remaining connections closed", f.rule.Name)
 }

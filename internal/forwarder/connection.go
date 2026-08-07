@@ -60,8 +60,8 @@ type copyResult struct {
 }
 
 // -------------------- handles the port forwarding logic --------------------
-func handlePortForward(client net.Conn, remoteAddress string, idleTimeout time.Duration) {
-	log.Printf("forwarding connection from client %s to target %s", client.RemoteAddr(), remoteAddress)
+func handlePortForward(ruleName string, client net.Conn, remoteAddress string, idleTimeout time.Duration) {
+	log.Printf("rule %q: forwarding connection from client %s to target %s", ruleName, client.RemoteAddr(), remoteAddress)
 
 	defer client.Close()
 
