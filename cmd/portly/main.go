@@ -69,7 +69,7 @@ func main() {
 	for _, curForwarder := range forwarders {
 		forwarderProcesses.Add(1)
 
-		go func(f *forwarder.Forwarder){
+		go func(f *forwarder.Forwarder) {
 			defer forwarderProcesses.Done()
 
 			if err := f.Start(ctx); err != nil {
@@ -102,4 +102,3 @@ func main() {
 
 	log.Println("Portly stopped cleanly")
 }
-

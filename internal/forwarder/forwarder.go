@@ -15,7 +15,7 @@ import (
 type Forwarder struct {
 	rule config.RuntimeRule
 
-	listener net.Listener
+	listener    net.Listener
 	connections sync.WaitGroup
 
 	// closed by Wait() once the shutdown timeout elapses, telling any
@@ -45,7 +45,7 @@ func (f *Forwarder) ListenAddress() string {
 
 func (f *Forwarder) TargetAddress() string {
 	return f.rule.Target
-} 
+}
 
 func (f *Forwarder) Start(ctx context.Context) error {
 	listener, err := net.Listen("tcp", f.rule.Listen)
