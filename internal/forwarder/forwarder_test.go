@@ -3,10 +3,8 @@ package forwarder
 import (
 	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -14,56 +12,112 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/daanniill/portly/internal/config"
 )
 
-type ForwarderConfig struct {
-	targetAddress string
-	idleTimeout   time.Duration
+// testForwarder wraps a Forwarder together with the machinery needed to
+// start and stop it deterministically in tests.
+type testForwarder struct {
+	*Forwarder
+
+	cancel context.CancelFunc
+	done   chan struct{}
+	err    error
 }
 
-func NewForwarderConfig() ForwarderConfig {
-	return ForwarderConfig{
-		targetAddress: "http://127.0.0.1:9001",
-		idleTimeout:   2 * time.Second,
+// newTestRule returns a RuntimeRule bound to a freshly allocated loopback
+// port, so tests never collide over a fixed port number.
+func newTestRule(t *testing.T, target string) config.RuntimeRule {
+	t.Helper()
+
+	return config.RuntimeRule{
+		Name:        "test",
+		Listen:      getFreeAddress(t),
+		Target:      target,
+		IdleTimeout: 2 * time.Second,
 	}
 }
 
-// startTestForwarder starts the forwarder on an automatically selected port.
-//
-// Using port 0 tells the operating system to choose an available port,
-// which prevents test failures caused by ports already being occupied.
-func startTestForwarder(t *testing.T, forwarderCfg ForwarderConfig) net.Listener {
-	t.Helper() // mark this function as a helper
+// getFreeAddress asks the OS for an available loopback port and returns its
+// address. The listener is closed immediately so a forwarder can bind to it.
+func getFreeAddress(t *testing.T) string {
+	t.Helper()
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0") // define a listener on any available port
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		log.Fatalf("failed to create forwarder listener: %v", err)
+		t.Fatalf("failed to reserve a free port: %v", err)
 	}
 
-	errCh := make(chan error, 1)
+	address := listener.Addr().String()
 
-	var connections sync.WaitGroup
+	if err := listener.Close(); err != nil {
+		t.Fatalf("failed to release reserved port: %v", err)
+	}
 
-	f := &Forwarder{
-		TargetAddress: forwarderCfg.targetAddress,
-		IdleTimeout:   forwarderCfg.idleTimeout,
+	return address
+}
+
+// startTestForwarder starts a forwarder for rule in the background and
+// registers cleanup to shut it down once the test finishes.
+func startTestForwarder(t *testing.T, rule config.RuntimeRule) *testForwarder {
+	t.Helper()
+
+	f := New(rule)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	tf := &testForwarder{
+		Forwarder: f,
+		cancel:    cancel,
+		done:      make(chan struct{}),
 	}
 
 	go func() {
-		errCh <- f.Run(listener, &connections)
+		tf.err = f.Start(ctx)
+		close(tf.done)
 	}()
 
-	// free up resources after running tests
+	waitUntilListening(t, rule.Listen)
+
 	t.Cleanup(func() {
-		// tests may have already closed the listener themselves (e.g. to
-		// simulate a shutdown signal), so ignore an already-closed listener
-		if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
-			t.Errorf("failed to close listener: %v", err)
-		}
-		connections.Wait()
+		tf.stopAccepting(t)
+		tf.Wait()
 	})
 
-	return listener // returns listener
+	return tf
+}
+
+// stopAccepting cancels the forwarder's context and blocks until it has
+// stopped accepting new connections. Safe to call more than once.
+func (tf *testForwarder) stopAccepting(t *testing.T) {
+	t.Helper()
+
+	tf.cancel()
+	<-tf.done
+
+	if tf.err != nil {
+		t.Errorf("forwarder %q exited with error: %v", tf.Name(), tf.err)
+	}
+}
+
+// waitUntilListening blocks until address accepts TCP connections, so tests
+// don't race the forwarder's goroutine that binds the listener.
+func waitUntilListening(t *testing.T, address string) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", address, 100*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("forwarder did not start listening on %s in time", address)
 }
 
 // getTargetAddress extracts "127.0.0.1:port" from an httptest URL.
@@ -78,7 +132,7 @@ func getTargetAddress(t *testing.T, serverURL string) string {
 	return parsedURL.Host
 }
 
-// creates a client to send requests
+// newTestHTTPClient creates a client to send requests
 func newTestHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout: 3 * time.Second,
@@ -93,9 +147,6 @@ func newTestHTTPClient() *http.Client {
 func TestForwarderForwardsHTTPResponse(t *testing.T) {
 	// create a target test server using httptest
 	targetServer := httptest.NewServer(
-		// defining a handler function for this test server to handle http request
-		// w is used to construct the HTTP response sent back to the client.
-		// r contains information about the incoming request.
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Connection", "close") // close tcp connections when response finishes
 			w.WriteHeader(http.StatusOK)          // send 200 for succesful connections
@@ -105,17 +156,14 @@ func TestForwarderForwardsHTTPResponse(t *testing.T) {
 			}
 		}),
 	)
-
 	defer targetServer.Close()
 
-	targetCfg := NewForwarderConfig()
-	targetCfg.targetAddress = getTargetAddress(t, targetServer.URL)
-	forwarderAddress := startTestForwarder(t, targetCfg).Addr().String()
+	rule := newTestRule(t, getTargetAddress(t, targetServer.URL))
+	startTestForwarder(t, rule)
 
-	// initialize a client to send http requests
 	client := newTestHTTPClient()
 
-	response, err := client.Get("http://" + forwarderAddress)
+	response, err := client.Get("http://" + rule.Listen)
 	if err != nil {
 		t.Fatalf("request through forwarder failed: %v", err)
 	}
@@ -149,9 +197,6 @@ func TestForwarderForwardsHTTPResponse(t *testing.T) {
 func TestForwarderHandlesConcurrentClients(t *testing.T) {
 	// create a target test server using httptest
 	targetServer := httptest.NewServer(
-		// defining a handler function for this test server to handle http request
-		// w is used to construct the HTTP response sent back to the client.
-		// r contains information about the incoming request.
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Connection", "close") // close tcp connections when response finishes
 			w.WriteHeader(http.StatusOK)          // send 200 for succesful connections
@@ -161,29 +206,25 @@ func TestForwarderHandlesConcurrentClients(t *testing.T) {
 			}
 		}),
 	)
-
 	defer targetServer.Close()
 
-	targetCfg := NewForwarderConfig()
-	targetCfg.targetAddress = getTargetAddress(t, targetServer.URL)
-	forwarderAddress := startTestForwarder(t, targetCfg).Addr().String()
+	rule := newTestRule(t, getTargetAddress(t, targetServer.URL))
+	startTestForwarder(t, rule)
 
 	const requestCount = 50
 
-	// initialize a client to send http requests
 	client := newTestHTTPClient()
 	errCh := make(chan error, requestCount)
 
 	var wg sync.WaitGroup
 
 	for i := 1; i <= requestCount; i++ {
-
 		wg.Add(1)
 
 		go func(requestNumber int) {
 			defer wg.Done()
 
-			response, err := client.Get("http://" + forwarderAddress)
+			response, err := client.Get("http://" + rule.Listen)
 			if err != nil {
 				errCh <- fmt.Errorf("request %d through forwarder failed: %v", requestNumber, err)
 				return
@@ -218,29 +259,18 @@ func TestForwarderHandlesConcurrentClients(t *testing.T) {
 }
 
 func TestForwarderSurvivesUnavailableTarget(t *testing.T) {
-	// occupy a port with a listener then immediatley close it
-	listener, err := net.Listen("tcp", "127.0.0.1:0") // define a listener on any available port
-	if err != nil {
-		log.Fatalf("failed to create forwarder listener: %v", err)
-	}
+	// a reserved-then-released address that nothing is listening on
+	unavailableTarget := getFreeAddress(t)
 
-	unavailableTarget := listener.Addr().String()
-	// close the listener freeing the port
-	if err := listener.Close(); err != nil {
-		t.Fatalf("failed to close temporary target listener: %v", err)
-	}
+	rule := newTestRule(t, unavailableTarget)
+	startTestForwarder(t, rule)
 
-	// connect to the unavailable address
-
-	unavailableTargetCfg := NewForwarderConfig()
-	unavailableTargetCfg.targetAddress = unavailableTarget
-	forwarderAddress := startTestForwarder(t, unavailableTargetCfg).Addr().String()
 	client := newTestHTTPClient()
 
 	// Try twice. The requests should fail, but the forwarder listener
 	// should remain alive and accept the second connection.
 	for attempt := 1; attempt <= 2; attempt++ {
-		response, err := client.Get("http://" + forwarderAddress)
+		response, err := client.Get("http://" + rule.Listen)
 
 		if err == nil {
 			response.Body.Close()
@@ -252,9 +282,6 @@ func TestForwarderSurvivesUnavailableTarget(t *testing.T) {
 func TestIdleTimeout(t *testing.T) {
 	// create a target test server using httptest
 	targetServer := httptest.NewServer(
-		// defining a handler function for this test server to handle http request
-		// w is used to construct the HTTP response sent back to the client.
-		// r contains information about the incoming request.
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Connection", "close") // close tcp connections when response finishes
 			w.WriteHeader(http.StatusOK)          // send 200 for succesful connections
@@ -264,14 +291,12 @@ func TestIdleTimeout(t *testing.T) {
 			}
 		}),
 	)
-
 	defer targetServer.Close()
 
-	targetCfg := NewForwarderConfig()
-	targetCfg.targetAddress = getTargetAddress(t, targetServer.URL)
-	forwarderAddress := startTestForwarder(t, targetCfg).Addr().String()
+	rule := newTestRule(t, getTargetAddress(t, targetServer.URL))
+	startTestForwarder(t, rule)
 
-	target, err := net.Dial("tcp", forwarderAddress)
+	target, err := net.Dial("tcp", rule.Listen)
 	if err != nil {
 		t.Fatalf("failed to dial forwarder: %v", err)
 	}
@@ -289,9 +314,6 @@ func TestIdleTimeout(t *testing.T) {
 func TestForwarderDeadline(t *testing.T) {
 	// create a target test server using httptest
 	targetServer := httptest.NewServer(
-		// defining a handler function for this test server to handle http request
-		// w is used to construct the HTTP response sent back to the client.
-		// r contains information about the incoming request.
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Connection", "close") // close tcp connections when response finishes
 			w.WriteHeader(http.StatusOK)          // send 200 for succesful connections
@@ -301,15 +323,13 @@ func TestForwarderDeadline(t *testing.T) {
 			}
 		}),
 	)
-
 	defer targetServer.Close()
 
-	targetCfg := NewForwarderConfig()
-	targetCfg.targetAddress = getTargetAddress(t, targetServer.URL)
-	targetCfg.idleTimeout = 200 * time.Millisecond
-	forwarderAddress := startTestForwarder(t, targetCfg).Addr().String()
+	rule := newTestRule(t, getTargetAddress(t, targetServer.URL))
+	rule.IdleTimeout = 200 * time.Millisecond
+	startTestForwarder(t, rule)
 
-	target, err := net.Dial("tcp", forwarderAddress)
+	target, err := net.Dial("tcp", rule.Listen)
 	if err != nil {
 		t.Fatalf("failed to dial forwarder: %v", err)
 	}
@@ -346,14 +366,14 @@ loop:
 	}
 }
 
-// TestForwarderGracefulShutdown checks that closing the listener (as happens
-// on a shutdown signal) stops runForwarder cleanly while letting an
-// already in-flight connection finish instead of killing it.
+// TestForwarderGracefulShutdown checks that cancelling the forwarder's
+// context (as happens on a shutdown signal) stops it from accepting new
+// connections while letting an already in-flight connection finish instead
+// of killing it.
 func TestForwarderGracefulShutdown(t *testing.T) {
 	// signals that the target has received the request, proving the
 	// connection has actually been accepted and forwarded end-to-end
-	// (not just sitting in the OS accept backlog) before we close the
-	// listener below
+	// (not just sitting in the OS accept backlog) before we shut down below
 	requestReceived := make(chan struct{})
 	// holds the target's response until the test says it's safe to send it,
 	// so the connection is genuinely in flight when we simulate shutdown
@@ -361,9 +381,6 @@ func TestForwarderGracefulShutdown(t *testing.T) {
 
 	// create a target test server using httptest
 	targetServer := httptest.NewServer(
-		// defining a handler function for this test server to handle http request
-		// w is used to construct the HTTP response sent back to the client.
-		// r contains information about the incoming request.
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			close(requestReceived)
 			<-releaseResponse
@@ -376,16 +393,13 @@ func TestForwarderGracefulShutdown(t *testing.T) {
 			}
 		}),
 	)
-
 	defer targetServer.Close()
 
-	targetCfg := NewForwarderConfig()
-	targetCfg.targetAddress = getTargetAddress(t, targetServer.URL)
-	targetCfg.idleTimeout = 200 * time.Millisecond
-	forwarder := startTestForwarder(t, targetCfg)
-	forwarderAddress := forwarder.Addr().String()
+	rule := newTestRule(t, getTargetAddress(t, targetServer.URL))
+	rule.IdleTimeout = 200 * time.Millisecond
+	tf := startTestForwarder(t, rule)
 
-	target, err := net.Dial("tcp", forwarderAddress)
+	target, err := net.Dial("tcp", rule.Listen)
 	if err != nil {
 		t.Fatalf("failed to dial forwarder: %v", err)
 	}
@@ -398,13 +412,12 @@ func TestForwarderGracefulShutdown(t *testing.T) {
 	}
 
 	// wait until the target has actually seen the request, so we know the
-	// connection was accepted and forwarded before we close the listener
+	// connection was accepted and forwarded before we shut down
 	<-requestReceived
 
-	// simulate a shutdown signal: stop accepting new connections
-	if err := forwarder.Close(); err != nil {
-		t.Fatalf("failed to close listener: %v", err)
-	}
+	// simulate a shutdown signal: stop accepting new connections, and
+	// block until the forwarder has actually done so
+	tf.stopAccepting(t)
 
 	// let the target finish responding now that shutdown has been triggered
 	close(releaseResponse)
@@ -429,7 +442,7 @@ func TestForwarderGracefulShutdown(t *testing.T) {
 	}
 
 	// but a brand new connection should now be rejected
-	if conn, err := net.Dial("tcp", forwarderAddress); err == nil {
+	if conn, err := net.Dial("tcp", rule.Listen); err == nil {
 		conn.Close()
 		t.Fatalf("expected new connections to be rejected after shutdown")
 	}
