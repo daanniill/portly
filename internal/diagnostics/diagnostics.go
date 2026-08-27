@@ -33,13 +33,13 @@ func checkTarget(remoteAddress string) DiagnosticResult {
 		}
 }
 
-// checks if listener 
+// checks if listener can open on listen address
 func checkListenAddress(address string) DiagnosticResult {
 	listener, err := net.Listen("tcp", address)
 
 	if err != nil {
 		return DiagnosticResult{
-			Check: "target",
+			Check: "listener",
 			Success: false,
 			Message: fmt.Sprintf("cannot listen on %s: %v", address, err),
 		}
@@ -48,8 +48,42 @@ func checkListenAddress(address string) DiagnosticResult {
 	defer listener.Close()
 
 	return DiagnosticResult{
-			Check: "target",
+			Check: "listener",
 			Success: true,
 			Message: fmt.Sprintf("%s is available", listener.Addr()),
+	}
+}
+
+func checkExposure(address string) DiagnosticResult {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return DiagnosticResult{
+			Check:   "exposure",
+			Success: false,
+			Message: fmt.Sprintf("invalid listen address: %v", err),
+		}
+	}
+
+	switch host {
+	case "127.0.0.1", "localhost", "::1":
+		return DiagnosticResult{
+			Check: "exposure",
+			Success: true,
+			Message: "listener is restricted to this machine",
+		}
+
+	case "0.0.0.0", "::":
+		return DiagnosticResult{
+			Check: "exposure",
+			Success: true,
+			Message: "warning: listener accepts connections on all network interfaces",
+		}
+
+	default:
+		return DiagnosticResult{
+			Check: "exposure",
+			Success: true,
+			Message: fmt.Sprintf("listener is bound to %s", host),
+		}
 	}
 }
