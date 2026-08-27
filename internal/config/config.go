@@ -61,8 +61,10 @@ func Load(path string) ([]RuntimeRule, error) {
 			return nil, fmt.Errorf("rule %d: duplicate rule name %q", i+1, runtimeRule.Name)
 		}
 
-		if _, exists := listeners[runtimeRule.Listen]; exists {
-			return nil, fmt.Errorf("rule %q: duplicate listen address %q", runtimeRule.Name, runtimeRule.Listen)
+		if runtimeRule.Listen != ":0" {
+			if _, exists := listeners[runtimeRule.Listen]; exists {
+				return nil, fmt.Errorf("rule %q: duplicate listen address %q", runtimeRule.Name, runtimeRule.Listen)
+			}
 		}
 
 		names[runtimeRule.Name] = struct{}{}
@@ -84,7 +86,7 @@ func validateRule(rule Rule) (RuntimeRule, error) {
 	}
 
 	if rule.Listen == "" {
-		return RuntimeRule{}, fmt.Errorf("listen address is required")
+		rule.Listen = ":0"
 	}
 
 	if rule.Target == "" {
