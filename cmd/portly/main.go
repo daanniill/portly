@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -21,6 +22,12 @@ func main() {
 		"config",
 		"portly.yaml",
 		"path to the Portly config file",
+	)
+
+	diagnose := flag.Bool(
+		"diagnose",
+		false,
+		"run diagnostic checks on the configured rules and exit",
 	)
 
 	/* Remove flags for one forwarder
@@ -47,6 +54,10 @@ func main() {
 	rules, err := config.Load(*configPath)
 	if err != nil {
 		log.Fatalf("failed to load configuration: %v", err)
+	}
+
+	if *diagnose {
+		os.Exit(runDiagnostics(rules))
 	}
 
 	//  ------- GRACEFUL SHUTDOWN -------
@@ -101,4 +112,29 @@ func main() {
 	}
 
 	log.Println("Portly stopped cleanly")
+}
+
+// runDiagnostics prints the diagnostic results for each rule and returns
+// the process exit code: 0 if every check passed, 1 otherwise.
+func runDiagnostics(rules []config.RuntimeRule) int {
+	results := config.Diagnose(rules)
+
+	exitCode := 0
+
+	for _, rule := range rules {
+		fmt.Printf("rule %q:\n", rule.Name)
+
+		for _, result := range results[rule.Name] {
+			status := "OK"
+
+			if !result.Success {
+				status = "FAIL"
+				exitCode = 1
+			}
+
+			fmt.Printf("  [%s] %s: %s\n", status, result.Check, result.Message)
+		}
+	}
+
+	return exitCode
 }

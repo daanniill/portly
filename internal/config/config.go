@@ -124,7 +124,18 @@ func validateRule(rule Rule) (RuntimeRule, error) {
 	}, nil
 }
 
-func diagnoseRule(rule Rule) []diagnostics.DiagnosticResult {
+// Diagnose runs connectivity and exposure checks for each rule, keyed by rule name.
+func Diagnose(rules []RuntimeRule) map[string][]diagnostics.DiagnosticResult {
+	results := make(map[string][]diagnostics.DiagnosticResult, len(rules))
+
+	for _, rule := range rules {
+		results[rule.Name] = diagnoseRule(rule)
+	}
+
+	return results
+}
+
+func diagnoseRule(rule RuntimeRule) []diagnostics.DiagnosticResult {
 	return []diagnostics.DiagnosticResult{
 		diagnostics.CheckListenAddress(rule.Listen),
 		diagnostics.CheckTarget(rule.Target),

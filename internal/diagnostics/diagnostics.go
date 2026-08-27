@@ -29,7 +29,7 @@ func CheckTarget(remoteAddress string) DiagnosticResult {
 	return DiagnosticResult{
 			Check: "target",
 			Success: true,
-			Message: fmt.Sprintf("%s is reachable", target),
+			Message: fmt.Sprintf("%s is reachable", remoteAddress),
 		}
 }
 
