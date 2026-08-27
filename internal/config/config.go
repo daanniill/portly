@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/daanniill/portly/internal/diagnostics"
 	"go.yaml.in/yaml/v4"
 )
 
@@ -61,8 +62,10 @@ func Load(path string) ([]RuntimeRule, error) {
 			return nil, fmt.Errorf("rule %d: duplicate rule name %q", i+1, runtimeRule.Name)
 		}
 
-		if _, exists := listeners[runtimeRule.Listen]; exists {
-			return nil, fmt.Errorf("rule %q: duplicate listen address %q", runtimeRule.Name, runtimeRule.Listen)
+		if runtimeRule.Listen != ":0" {
+			if _, exists := listeners[runtimeRule.Listen]; exists {
+				return nil, fmt.Errorf("rule %q: duplicate listen address %q", runtimeRule.Name, runtimeRule.Listen)
+			}
 		}
 
 		names[runtimeRule.Name] = struct{}{}
@@ -84,7 +87,7 @@ func validateRule(rule Rule) (RuntimeRule, error) {
 	}
 
 	if rule.Listen == "" {
-		return RuntimeRule{}, fmt.Errorf("listen address is required")
+		rule.Listen = ":0"
 	}
 
 	if rule.Target == "" {
@@ -119,4 +122,23 @@ func validateRule(rule Rule) (RuntimeRule, error) {
 		Target:      rule.Target,
 		IdleTimeout: idleTimeout,
 	}, nil
+}
+
+// Diagnose runs connectivity and exposure checks for each rule, keyed by rule name.
+func Diagnose(rules []RuntimeRule) map[string][]diagnostics.DiagnosticResult {
+	results := make(map[string][]diagnostics.DiagnosticResult, len(rules))
+
+	for _, rule := range rules {
+		results[rule.Name] = diagnoseRule(rule)
+	}
+
+	return results
+}
+
+func diagnoseRule(rule RuntimeRule) []diagnostics.DiagnosticResult {
+	return []diagnostics.DiagnosticResult{
+		diagnostics.CheckListenAddress(rule.Listen),
+		diagnostics.CheckTarget(rule.Target),
+		diagnostics.CheckExposure(rule.Listen),
+	}
 }
