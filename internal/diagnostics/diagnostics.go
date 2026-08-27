@@ -7,7 +7,7 @@ import (
 )
 
 type DiagnosticResult struct {
-	Check string
+	Check   string
 	Success bool
 	Message string
 }
@@ -18,7 +18,7 @@ func CheckTarget(remoteAddress string) DiagnosticResult {
 
 	if err != nil {
 		return DiagnosticResult{
-			Check: "target",
+			Check:   "target",
 			Success: false,
 			Message: fmt.Sprintf("cannot reach %s: %v", remoteAddress, err),
 		}
@@ -27,10 +27,10 @@ func CheckTarget(remoteAddress string) DiagnosticResult {
 	defer target.Close()
 
 	return DiagnosticResult{
-			Check: "target",
-			Success: true,
-			Message: fmt.Sprintf("%s is reachable", remoteAddress),
-		}
+		Check:   "target",
+		Success: true,
+		Message: fmt.Sprintf("%s is reachable", remoteAddress),
+	}
 }
 
 // checks if listener can open on listen address
@@ -39,7 +39,7 @@ func CheckListenAddress(address string) DiagnosticResult {
 
 	if err != nil {
 		return DiagnosticResult{
-			Check: "listener",
+			Check:   "listener",
 			Success: false,
 			Message: fmt.Sprintf("cannot listen on %s: %v", address, err),
 		}
@@ -48,9 +48,9 @@ func CheckListenAddress(address string) DiagnosticResult {
 	defer listener.Close()
 
 	return DiagnosticResult{
-			Check: "listener",
-			Success: true,
-			Message: fmt.Sprintf("%s is available", listener.Addr()),
+		Check:   "listener",
+		Success: true,
+		Message: fmt.Sprintf("%s is available", listener.Addr()),
 	}
 }
 
@@ -67,21 +67,21 @@ func CheckExposure(address string) DiagnosticResult {
 	switch host {
 	case "127.0.0.1", "localhost", "::1":
 		return DiagnosticResult{
-			Check: "exposure",
+			Check:   "exposure",
 			Success: true,
 			Message: "listener is restricted to this machine",
 		}
 
 	case "0.0.0.0", "::":
 		return DiagnosticResult{
-			Check: "exposure",
+			Check:   "exposure",
 			Success: true,
 			Message: "warning: listener accepts connections on all network interfaces",
 		}
 
 	default:
 		return DiagnosticResult{
-			Check: "exposure",
+			Check:   "exposure",
 			Success: true,
 			Message: fmt.Sprintf("listener is bound to %s", host),
 		}
