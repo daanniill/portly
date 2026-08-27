@@ -1,8 +1,8 @@
 # Portly
 
-Portly is a small TCP port forwarder. It listens on one address, opens a TCP
-connection to a target, and copies traffic in both directions. It currently
-supports **TCP only**.
+Portly is a small TCP port forwarder. It listens on one or more addresses,
+opens a TCP connection to each rule's target, and copies traffic in both
+directions. It currently supports **TCP only**.
 
 ## Build
 
@@ -14,8 +14,8 @@ go build -o portly ./cmd/portly
 
 ## Run
 
-With no flags, Portly listens on an OS-assigned port on `127.0.0.1` (printed
-at startup) and forwards to `127.0.0.1:9001`:
+Portly reads its forwarding rules from a YAML config file, `portly.yaml` in
+the current directory by default:
 
 ```bash
 ./portly
@@ -27,28 +27,45 @@ You can also run it without building a binary first:
 go run ./cmd/portly
 ```
 
-### Flags and examples
+### Flags
 
 | Flag | Default | Purpose |
 |---|---|---|
-| `-listen` | `127.0.0.1:0` | Address Portly accepts connections on (`:0` picks any available port) |
-| `-target` | `127.0.0.1:9001` | Address Portly forwards connections to |
-| `-idle-timeout` | `5m` | Close a connection after this long with no traffic in either direction; `0` disables |
+| `-config` | `portly.yaml` | Path to the Portly config file |
 
 ```bash
-# Forward one local port to another
-./portly -listen 127.0.0.1:8080 -target 127.0.0.1:9000
-
-# Listen on every IPv4 interface and forward to another host
-./portly -listen 0.0.0.0:8080 -target 192.168.1.50:9000
-
-# Close connections after 30 seconds of no traffic, or disable idle timeouts entirely
-./portly -idle-timeout 30s
-./portly -idle-timeout 0
+./portly -config ./configs/staging.yaml
 ```
 
-Stop Portly with `Ctrl+C` or `SIGTERM`. It stops accepting new connections and
-waits for active connections to finish.
+Stop Portly with `Ctrl+C` or `SIGTERM`. It stops accepting new connections on
+every rule and waits for active connections to finish.
+
+## Configuration
+
+A config file declares one or more forwarding rules under `rules`:
+
+```yaml
+rules:
+  - name: web
+    listen: 127.0.0.1:8080
+    target: 127.0.0.1:3000
+    idle_timeout: 5m
+
+  - name: minecraft
+    listen: 0.0.0.0:25565
+    target: 192.168.1.50:25565
+    idle_timeout: 30m
+```
+
+| Field | Required | Purpose |
+|---|---|---|
+| `name` | yes | Identifies the rule in logs; must be unique across the file |
+| `listen` | yes | Address Portly accepts connections on for this rule; must be unique across the file |
+| `target` | yes | Address Portly forwards connections to; must differ from `listen` |
+| `idle_timeout` | no | Close a connection after this long with no traffic in either direction (Go duration syntax, e.g. `30s`, `5m`); defaults to `5m`; `0` disables |
+
+Portly starts every rule as an independent listener and fails to start if the
+config has no rules, a duplicate `name`/`listen`, or an invalid field.
 
 > **Security:** Listening on `0.0.0.0` exposes the port on every IPv4 network
 > interface and may make it reachable from your LAN or the internet, depending
@@ -65,8 +82,8 @@ to work on Linux and Windows, but those platforms are not currently tested.
 
 - TCP only; UDP is not supported.
 - No authentication, access control, or TLS termination.
-- One forwarding rule per process and no connection limit.
-- Shutdown waits up to 10 seconds for active connections to finish, then exits
-  even if some are still active.
+- No per-rule connection limit.
+- Shutdown waits up to 10 seconds per rule for active connections to finish,
+  then exits even if some are still active.
 
 Run the tests with `go test ./...`.

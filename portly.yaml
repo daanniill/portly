@@ -1,0 +1,10 @@
+rules:
+  - name: web
+    listen: 127.0.0.1:8080
+    target: 127.0.0.1:3000
+    idle_timeout: 5m
+
+  - name: minecraft
+    listen: 0.0.0.0:25565
+    target: 192.168.1.50:25565
+    idle_timeout: 30m
