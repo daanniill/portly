@@ -13,7 +13,7 @@ type DiagnosticResult struct {
 }
 
 // checks if target is available for portly to open
-func checkTarget(remoteAddress string) DiagnosticResult {
+func CheckTarget(remoteAddress string) DiagnosticResult {
 	target, err := net.DialTimeout("tcp", remoteAddress, 5*time.Second)
 
 	if err != nil {
@@ -34,7 +34,7 @@ func checkTarget(remoteAddress string) DiagnosticResult {
 }
 
 // checks if listener can open on listen address
-func checkListenAddress(address string) DiagnosticResult {
+func CheckListenAddress(address string) DiagnosticResult {
 	listener, err := net.Listen("tcp", address)
 
 	if err != nil {
@@ -54,7 +54,7 @@ func checkListenAddress(address string) DiagnosticResult {
 	}
 }
 
-func checkExposure(address string) DiagnosticResult {
+func CheckExposure(address string) DiagnosticResult {
 	host, _, err := net.SplitHostPort(address)
 	if err != nil {
 		return DiagnosticResult{

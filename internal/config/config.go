@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/daanniill/portly/internal/diagnostics"
 	"go.yaml.in/yaml/v4"
 )
 
@@ -121,4 +122,12 @@ func validateRule(rule Rule) (RuntimeRule, error) {
 		Target:      rule.Target,
 		IdleTimeout: idleTimeout,
 	}, nil
+}
+
+func diagnoseRule(rule Rule) []diagnostics.DiagnosticResult {
+	return []diagnostics.DiagnosticResult{
+		diagnostics.CheckListenAddress(rule.Listen),
+		diagnostics.CheckTarget(rule.Target),
+		diagnostics.CheckExposure(rule.Listen),
+	}
 }
